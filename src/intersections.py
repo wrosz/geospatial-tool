@@ -76,7 +76,7 @@ def find_intersections_with_angle(borders: gpd.GeoDataFrame, streets: gpd.GeoDat
     return gdf
 
 
-def remove_close_angles(intersections: gpd.GeoDataFrame):
+def remove_small_angles(intersections: gpd.GeoDataFrame):
     return intersections[(intersections.angle >= 20) & (intersections.angle <= 160)]
 
 
@@ -108,18 +108,8 @@ def remove_close_points(points: gpd.GeoDataFrame, treshold):
     return points.iloc[kept].copy()
 
 
-def save_filtered_intersections(path, gdf):
-    gdf = remove_close_angles(gdf)
-    gdf = remove_close_points(gdf, 50)
-    gdf.to_file(path, driver="GeoJSON")
-
-
-def main():
-    # Skrypt użyty do znalezienia użytecznych przecięć ulic z obszarami ewidencyjnymi:
-    ulice_extended = gpd.read_file("input_data/ulice_extended.gpkg")    # geometria ulic przedłużonych o 20 m, znaleziona w QGis
-                                                                        # (niektóre ulice graniczą z obszarami ewidencyjnymi, ale ich geometria urywa się kawałek dalej)
-    granice = gpd.read_file("input_data/granice.gpkg")
-    intersections_angle = find_intersections_with_angle(ulice_extended, granice)    # usuń przecięcia geometrii ulic i geometrii granic przebiegających po tych ulicach
-    intersections_angle.to_file("output_data/intersections_angle.geojson", driver="GeoJSON")
-    save_filtered_intersections("output_data/filtered_intersections.geojson", intersections_angle)
-
+def find_valid_intersections(borders: gpd.GeoDataFrame, streets=gpd.read_file("input_data/ulice_extended.gpkg"), treshold=50):
+    points = find_intersections_with_angle(borders, streets)
+    points = points[(points.angle >= 20) & (points.angle <= 160)]  # remove small angles
+    points = remove_close_points(points, treshold)
+    return points

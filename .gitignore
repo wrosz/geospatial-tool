@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# VS Code settings
+.vscode/
+
+# Testing / coverage
+.coverage
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+htmlcov/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Ignore folders you don't want to upload:
+
+
