@@ -84,7 +84,6 @@ def remove_close_points(points: gpd.GeoDataFrame, treshold):
     '''Zwraca odfiltrowaną ramkę danych points, w której każdy punkt jest oddalony od pozostałych
     na odległość większą niż treshold'''
 
-    points = points.to_crs("EPSG:2180")
     geometries = points.geometry
     sindex = geometries.sindex
 

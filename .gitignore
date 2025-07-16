@@ -25,5 +25,8 @@ dist/
 *.egg-info/
 
 # Ignore folders you don't want to upload:
+input_data
+output_data
+qgis
 
 
