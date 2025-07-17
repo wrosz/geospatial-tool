@@ -1,5 +1,6 @@
 import geopandas as gpd
 import numpy as np
+import config
 
 def azimuth(p1, p2):
     '''Zwraca azymut odcinka o końcach p1, p2'''
@@ -71,13 +72,12 @@ def find_intersections_with_angle(borders: gpd.GeoDataFrame, streets: gpd.GeoDat
 
     gdf = gpd.GeoDataFrame(intersections, geometry=[f["geometry"] for f in intersections], crs=borders.crs)
     gdf["angle"] = [f["angle"] for f in intersections]
-    
-    print("find_intersections succeeded")
+
     return gdf
 
 
 def remove_small_angles(intersections: gpd.GeoDataFrame):
-    return intersections[(intersections.angle >= 20) & (intersections.angle <= 160)]
+    return intersections[(intersections.angle >= config.min_angle) & (intersections.angle <= 180-config.min_angle)]
 
 
 def remove_close_points(points: gpd.GeoDataFrame, treshold):
@@ -103,11 +103,10 @@ def remove_close_points(points: gpd.GeoDataFrame, treshold):
             if geom.distance(geometries.iloc[j]) < treshold:
                 rejected.add(j)
 
-    print("remove_close_points succeeded")
     return points.iloc[kept].copy()
 
 
-def find_valid_intersections(borders: gpd.GeoDataFrame, streets=gpd.read_file("input_data/ulice_extended.gpkg"), treshold=50):
+def find_valid_intersections(borders: gpd.GeoDataFrame, streets, treshold=50):
     points = find_intersections_with_angle(borders, streets)
     points = points[(points.angle >= 20) & (points.angle <= 160)]  # remove small angles
     points = remove_close_points(points, treshold)
