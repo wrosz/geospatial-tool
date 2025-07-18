@@ -1,6 +1,6 @@
 # Praktyki Project
 
-This project is a Python-based geospatial data processing toolkit. It leverages GeoPandas and NumPy to analyze, filter, and process spatial data, particularly for urban infrastructure such as streets, addresses, and boundaries in Warsaw.
+This project is a Python-based geospatial data processing toolkit. It leverages GeoPandas and NumPy to analyze, filter, and process spatial data, particularly for urban infrastructure such as streets, addresses, and boundaries.
 
 ## Project Structure
 
