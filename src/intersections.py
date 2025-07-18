@@ -5,7 +5,6 @@ from shapely.geometry import Point, LineString
 from typing import Union
 
 
-
 def azimuth(p1: Point, p2: Point) -> float:
     """
     Returns the azimuth (bearing) in degrees between two points, measured clockwise from the north.
@@ -123,7 +122,6 @@ def remove_small_angles(intersections: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         (intersections.angle >= config.min_angle) &
         (intersections.angle <= 180 - config.min_angle)
     ]
-
 
 
 def remove_close_points(points: gpd.GeoDataFrame, threshold: float) -> gpd.GeoDataFrame:
