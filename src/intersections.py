@@ -1,88 +1,146 @@
 import geopandas as gpd
 import numpy as np
 import config
+from shapely.geometry import Point, LineString
+from typing import Union
 
-def azimuth(p1, p2):
-    '''Zwraca azymut odcinka o końcach p1, p2'''
+
+
+def azimuth(p1: Point, p2: Point) -> float:
+    """
+    Returns the azimuth (bearing) in degrees between two points, measured clockwise from the north.
+
+    Args:
+        p1 (Point): Starting point.
+        p2 (Point): Target point.
+
+    Returns:
+        float: Azimuth in degrees (0–360).
+    """
     dx = p2.x - p1.x
     dy = p2.y - p1.y
     angle = np.degrees(np.arctan2(dy, dx)) % 360
     return angle
 
 
-def check_angle(pt, g, u):
-    '''Zwraca kąt pomiędzy odcinkami g, u przecinającymi się w punkcie pt'''
 
-    # Interpolacja punktów dalej na linii
-    g_proj = g.project(pt)
-    u_proj = u.project(pt)
-    g_near = g.interpolate(g_proj + 1)
-    u_near = u.interpolate(u_proj + 1)
-    
-    az_g = azimuth(pt, g_near)
-    az_u = azimuth(pt, u_near)
-    
-    diff = abs(az_g - az_u)
-    if diff > 180:
-        diff = 360 - diff
-    return diff
+def find_intersections_with_angle(
+    borders: gpd.GeoDataFrame,
+    streets: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """
+    Finds intersection points between cadastral borders and streets, 
+    and computes the angle between them at each intersection.
 
+    Reprojects both layers to a projected (metrical) CRS for geometric operations.
 
-def find_intersections_with_angle(borders: gpd.GeoDataFrame, streets: gpd.GeoDataFrame):
-    '''Zwraca ramkę danych z punktami przecięcia granic obszarów ewidencyjnych i ulic.
-    Każdy punkt ma dodatkowy atrybut angle (kąt między ulicą a granicą przecinającymi się w tym punkcie)'''
+    Args:
+        borders (GeoDataFrame): GeoDataFrame of border lines (LineStrings).
+        streets (GeoDataFrame): GeoDataFrame of street lines (LineStrings).
 
-    # Zgodny układ współrzędnych
-    if borders.crs != streets.crs:
-        streets = streets.to_crs(borders.crs)
+    Returns:
+        GeoDataFrame: Points of intersection with an added 'angle' column.
+    """
 
-    # Poprawne geometrie
+    def check_angle(pt: Point, b: LineString, s: LineString) -> float:
+        """
+        Returns the angle in degrees between two lines (g and u) at their intersection point (pt).
+
+        This is used to filter out near-parallel intersections (small angles), which are often false.
+
+        Args:
+            pt (Point): Intersection point.
+            b (LineString): First geometry (usually a border).
+            s (LineString): Second geometry (usually a street).
+
+        Returns:
+            float: Angle in degrees between the lines at the intersection point.
+        """
+        b_proj = b.project(pt)
+        s_proj = s.project(pt)
+        b_near = b.interpolate(b_proj + 1)
+        s_near = s.interpolate(s_proj + 1)
+
+        az_b = azimuth(pt, b_near)
+        az_s = azimuth(pt, s_near)
+
+        diff = abs(az_b - az_s)
+        return 360 - diff if diff > 180 else diff
+
+    # Reproject to a metrical CRS for all geometric calculations
+    borders = borders.to_crs(config.metrical_crs)
+    streets = streets.to_crs(config.metrical_crs)
+
     borders = borders[borders.is_valid]
     streets = streets[streets.is_valid]
 
-    ulice_sindex = streets.sindex  # Spatial index
-
+    street_sindex = streets.sindex
     intersections = []
 
-    for i, g_row in borders.iterrows():
-        # Potencjalne ulice przecinające bounding box granicy
-        possible_matches_index = list(ulice_sindex.intersection(g_row.geometry.bounds))
+    for _, b_row in borders.iterrows():
+        # Spatial index: find streets intersecting the bounding box of the border
+        possible_matches_index = list(street_sindex.intersection(b_row.geometry.bounds))
         possible_matches = streets.iloc[possible_matches_index]
-        
-        # Dokładne przecięcia na possible_matches
-        for j, u_row in possible_matches.iterrows():
-            if g_row.geometry.intersects(u_row.geometry):
-                pt = g_row.geometry.intersection(u_row.geometry)  # punkt przecięcia ulicy z granicą
-                g = g_row.geometry  # geometria granicy
-                u = u_row.geometry  # geometria ulicy
 
+        for _, s_row in possible_matches.iterrows():
+            if b_row.geometry.intersects(s_row.geometry):
+                pt = b_row.geometry.intersection(s_row.geometry)
+                b = b_row.geometry
+                s = s_row.geometry
+
+                # Only handle simple Point intersections
                 if pt.geom_type != 'Point':
                     continue
 
-                try:  # dołącz atrybuty do znalezionego punktu i zapisz w liście intersections
-                    angle = check_angle(pt, g, u)
+                try:
+                    angle = check_angle(pt, b, s)
                     intersections.append({
-                    "geometry": pt,
-                    # "granica_geom": g,
-                    # "ulica_geom": u,
-                    "angle": angle
+                        "geometry": pt,
+                        "angle": angle
                     })
-                except Exception as e:
+                except Exception:
                     continue
 
-    gdf = gpd.GeoDataFrame(intersections, geometry=[f["geometry"] for f in intersections], crs=borders.crs)
+    gdf = gpd.GeoDataFrame(intersections, geometry=[f["geometry"] for f in intersections], crs=config.metrical_crs)
     gdf["angle"] = [f["angle"] for f in intersections]
 
     return gdf
 
 
-def remove_small_angles(intersections: gpd.GeoDataFrame):
-    return intersections[(intersections.angle >= config.min_angle) & (intersections.angle <= 180-config.min_angle)]
+
+def remove_small_angles(intersections: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Filters out intersection points where the angle is too small or too close to 180°,
+    based on the configured `config.min_angle`.
+
+    Args:
+        intersections (GeoDataFrame): GeoDataFrame with an 'angle' column.
+
+    Returns:
+        GeoDataFrame: Filtered intersections.
+    """
+    return intersections[
+        (intersections.angle >= config.min_angle) &
+        (intersections.angle <= 180 - config.min_angle)
+    ]
 
 
-def remove_close_points(points: gpd.GeoDataFrame, treshold):
-    '''Zwraca odfiltrowaną ramkę danych points, w której każdy punkt jest oddalony od pozostałych
-    na odległość większą niż treshold'''
+
+def remove_close_points(points: gpd.GeoDataFrame, threshold: float) -> gpd.GeoDataFrame:
+    """
+    Removes points that are closer to each other than a given threshold, using spatial indexing.
+
+    Automatically reprojects to `config.metrical_crs` if necessary for distance calculations.
+
+    Args:
+        points (GeoDataFrame): Input points to filter.
+        threshold (float): Minimum distance allowed between any two points (in meters).
+
+    Returns:
+        GeoDataFrame: Filtered set of points.
+    """
+    if points.crs != config.metrical_crs:
+        points = points.to_crs(config.metrical_crs)
 
     geometries = points.geometry
     sindex = geometries.sindex
@@ -95,19 +153,42 @@ def remove_close_points(points: gpd.GeoDataFrame, treshold):
             continue
 
         kept.append(i)
-        # Kandydaci na punkty bliższe niż treshold
-        candidate_idxs = sindex.query(geom.buffer(treshold))
+
+        # Find candidates within the buffer zone
+        candidate_idxs = sindex.query(geom.buffer(threshold))
         for j in candidate_idxs:
             if j == i or j in rejected:
                 continue
-            if geom.distance(geometries.iloc[j]) < treshold:
+            if geom.distance(geometries.iloc[j]) < threshold:
                 rejected.add(j)
 
     return points.iloc[kept].copy()
 
 
-def find_valid_intersections(borders: gpd.GeoDataFrame, streets, treshold=50):
+
+def find_valid_intersections(
+    borders: gpd.GeoDataFrame,
+    streets: gpd.GeoDataFrame,
+    threshold: float = 50
+) -> gpd.GeoDataFrame:
+    """
+    Finds and filters valid intersection points between border and street geometries.
+
+    Includes:
+    - Reprojecting to `config.metrical_crs`
+    - Computing angle at each intersection
+    - Removing intersections with small or near-180° angles
+    - Removing points that are too close to each other
+
+    Args:
+        borders (GeoDataFrame): Cadastral or administrative boundary lines.
+        streets (GeoDataFrame): Street centerlines.
+        threshold (float): Minimum distance allowed between valid intersection points (in meters).
+
+    Returns:
+        GeoDataFrame: Cleaned set of intersection points.
+    """
     points = find_intersections_with_angle(borders, streets)
-    points = points[(points.angle >= 20) & (points.angle <= 160)]  # remove small angles
-    points = remove_close_points(points, treshold)
+    points = remove_small_angles(points)
+    points = remove_close_points(points, threshold)
     return points

@@ -1,291 +1,436 @@
+import pandas as pd
+import geopandas as gpd
+import numpy as np
+
+import warnings
 import requests
 import polyline
-import geopandas as gpd
+
 from shapely.geometry import LineString, Polygon, MultiPoint
 from shapely.ops import split
-import warnings
-import numpy as np
-import pandas as pd
-from intersections import find_valid_intersections
 
+from intersections import find_valid_intersections
 import config
 
 
-def get_adresses(bbox):
+def get_osrm_route(
+    lon1: float, lat1: float, lon2: float, lat2: float
+) -> gpd.GeoDataFrame | None:
+    """
+    Requests a route from OSRM between two coordinates and returns it as a GeoDataFrame.
+
+    Args:
+        lon1 (float): Longitude of the start point.
+        lat1 (float): Latitude of the start point.
+        lon2 (float): Longitude of the end point.
+        lat2 (float): Latitude of the end point.
+
+    Returns:
+        gpd.GeoDataFrame | None: GeoDataFrame with the route LineString and duration, or None if OSRM fails.
+    """
     url = (
-        "https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaNumeracjiAdresowej?"
-        "service=WFS&"
-        "version=2.0.0&"
-        "request=GetFeature&"
-        "typeNames=ms:prg-adresy&"
-        f"bbox={bbox}"
-        "outputFormat=GML2"
+        f"http://localhost:5000/route/v1/driving/"
+        f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline&annotations=true"
     )
-    gdf = gpd.read_file(url, driver="GML")
-    gdf = gdf.to_crs(crs=config.univ_crs)
-    return gdf
-
-
-def get_osrm_route(lon1, lat1, lon2, lat2):
-    # docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
-
-    # coords must be (lon, lat)
-    url = f"http://localhost:5000/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
     response = requests.get(url)
     data = response.json()
 
     if data["code"] == "Ok":
-        # polyline gives (lat, lon), we need (lon, lat)
-        coords_latlon = polyline.decode(data["routes"][0]["geometry"])
+        geom = data["routes"][0]["geometry"]
+        duration = data["routes"][0]["duration"]
+        coords_latlon = polyline.decode(geom)
         coords_lonlat = [(lon, lat) for lat, lon in coords_latlon]
-        coords_lonlat = gpd.GeoSeries(LineString(coords_lonlat), crs="EPSG:4326")
-        coords_lonlat = coords_lonlat.to_crs(config.univ_crs)
-        return coords_lonlat
+        gdf = gpd.GeoDataFrame(geometry=[LineString(coords_lonlat)], crs="EPSG:4326")
+        gdf["duration"] = duration
+        gdf = gdf.to_crs(config.metrical_crs)
+        return gdf
     else:
         print("OSRM Error:", data)
         return None
 
 
-def find_all_routes(points: gpd.GeoDataFrame):
-    '''Returns a GeoDataFrame with geometries of routes connecting all pairs of points from a given set'''
+def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Computes OSRM routes between all unique pairs of points in the input GeoDataFrame.
 
+    Args:
+        points (gpd.GeoDataFrame): GeoDataFrame containing Point geometries. Must have at least 2 entries.
+
+    Returns:
+        gpd.GeoDataFrame: GeoDataFrame containing LineString geometries for each route between point pairs,
+                          with all routes concatenated and index reset.
+
+    Raises:
+        Exception: If the input GeoDataFrame contains fewer than 2 points.
+    """
     if len(points) < 2:
-        raise Exception("GeoDataGrame 'points' must contain at least 2 entries")
-    points = points.to_crs("EPSG:4326")
-    routes = []
-    for i in range(len(points)):
-        for j in range(i+1, len(points)):
-            p1 = points.iloc[i]
-            p2 = points.iloc[j]
-            p1_lon = p1.geometry.x
-            p1_lat = p1.geometry.y
-            p2_lon = p2.geometry.x
-            p2_lat = p2.geometry.y
-            route = get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
-            routes.append({"geometry": route.geometry.iloc[0], "from": i, "to": j})
-    routes = gpd.GeoDataFrame(routes, geometry="geometry", crs=config.univ_crs)
-    return routes
+        raise Exception("GeoDataFrame 'points' must contain at least 2 entries")
+
+    points_wgs84 = points.to_crs("EPSG:4326")
+    routes: list[gpd.GeoDataFrame] = []
+
+    for i in range(len(points_wgs84)):
+        for j in range(i + 1, len(points_wgs84)):
+            p1 = points_wgs84.iloc[i]
+            p2 = points_wgs84.iloc[j]
+            p1_lon, p1_lat = p1.geometry.x, p1.geometry.y
+            p2_lon, p2_lat = p2.geometry.x, p2.geometry.y
+
+            route_gdf = get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
+            if route_gdf is not None:
+                routes.append(route_gdf)
+
+    if routes:
+        routes_gdf = pd.concat(routes).reset_index(drop=True)
+        return routes_gdf
+    else:
+        return gpd.GeoDataFrame(columns=["geometry", "duration"], crs="EPSG:4326")
 
 
-def calculate_weight(line, geoms_set, geom_attr_weights: dict):
-     
-    # buffer the line (to width given by config.buff parameter) to find its intersection with geoms_set
-    buffered_line = line.geometry.buffer(config.buff)
+def calculate_weight_by_buffer(
+    line: gpd.GeoDataFrame,
+    geoms_set: gpd.GeoDataFrame,
+    weights: pd.DataFrame,
+    buffer: float = config.buff,
+    non_relevant_len: float = config.non_relevant_len,
+) -> float:
+    """
+    Calculates a weighted average of intersected geometry lengths along a buffered line.
+
+    Args:
+        line (gpd.GeoDataFrame): GeoDataFrame with a single LineString geometry.
+        geoms_set (gpd.GeoDataFrame): GeoDataFrame of geometries to intersect with the buffer.
+        weights (pd.DataFrame): DataFrame with columns ["osm_key", "osm_value", "weight"].
+        buffer (float): Buffer distance for the line.
+        non_relevant_len (float): Minimum intersection length to consider relevant.
+
+    Returns:
+        float: Weighted average value for the intersected geometries.
+    """
+
+    # ensure line and geoms_set are in the correct CRS (metrical units)
+    line_metric = line.to_crs(config.metrical_crs)
+    geoms_set_metric = geoms_set.to_crs(config.metrical_crs)
+
+    # ensure weights DataFrame has the required columns
+    for colname in ["osm_key", "osm_value", "weight"]:
+        if colname not in weights.columns:
+            raise ValueError(f"Data frame 'weights' not defined properly: column {colname} missing")
+
+    # create a buffer around the line
+    buffered_line = line_metric.geometry.buffer(buffer)
+
+    # ensure buffered_line is a Polygon (can be MultiPolygon, if argument line is a MultiLineString)
     if not isinstance(buffered_line, Polygon):
         buffered_line = buffered_line.union_all()
 
-    # find intersections
-    possible_matches = geoms_set.iloc[geoms_set.sindex.query(buffered_line, predicate="intersects")]
+    # find geometries that intersect with the buffered line
+    possible_matches = geoms_set_metric.iloc[
+        geoms_set_metric.sindex.query(buffered_line, predicate="intersects")
+    ]
     geoms_along_line = possible_matches[possible_matches.intersects(buffered_line)]
     geoms_along_line["intersect_geom"] = geoms_along_line.geometry.intersection(buffered_line)
     geoms_along_line["intersect_length"] = geoms_along_line["intersect_geom"].length
-    total_weight = 0
-    total_length = 0
+    relevant_geoms = geoms_along_line[geoms_along_line.intersect_length >= non_relevant_len].copy()
 
-    # calculate weight
-    # trzeba zaraz zmienić żeby działało też na inne atrybuty niż highway
-    for i, row in geoms_along_line.iterrows():
-        if row.intersect_geom.length <= config.non_relevant_len:  # ignore non-relevant streets
+    # if no relevant geometries found, return 0.0
+    if relevant_geoms.empty:
+        warnings.warn("No relevant geometries found for the given buffer and non-relevant length, returning 0.0")
+        return 0.0
+    
+    # calculate total weight for each geometry based on the weights DataFrame
+    relevant_geoms = relevant_geoms.reset_index(drop=True)
+    relevant_geoms["total_weight"] = 0
+
+    # iterate over each osm_key in weights and calculate the total weight
+    for key in weights.osm_key.unique():
+        try:
+            arr = relevant_geoms[["intersect_length", key]]
+        except KeyError:
             continue
-        highway_type = row.highway
-        segment_weight = geom_attr_weights[("highway", highway_type)]
-        total_weight += segment_weight * row.intersect_geom.length
-        total_length += row.intersect_geom.length
-    return total_weight / total_length
+        w = weights[weights.osm_key == key][["osm_value", "weight"]]
+        to_add = pd.merge(arr, w, how="left", left_on=key, right_on="osm_value")
+        relevant_geoms.total_weight = relevant_geoms.total_weight.values + to_add.weight.fillna(0).values
+    
+    if sum(relevant_geoms.intersect_length) == 0:
+        warnings.warn("Total intersect length is zero, returning 0.0 for weight.")  
+        return 0.0
+    return float(
+        sum(relevant_geoms.total_weight * relevant_geoms.intersect_length)
+        / sum(relevant_geoms.intersect_length)
+    )
 
 
-def adresses_inside_polygon(polygon:Polygon, adresses: gpd.GeoDataFrame):
-    possible_matches = adresses.iloc[adresses.geometry.sindex.query(polygon, predicate="contains")]
+def adresses_inside_polygon(
+    polygon: Polygon, adresses: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """
+    Returns addresses from a GeoDataFrame that are located within a given polygon.
+
+    Args:
+        polygon (Polygon): The polygon geometry.
+        adresses (gpd.GeoDataFrame): GeoDataFrame of address points.
+
+    Returns:
+        gpd.GeoDataFrame: Subset of addresses within the polygon.
+    """
+    possible_matches = adresses.iloc[
+        adresses.geometry.sindex.query(polygon, predicate="contains")
+    ]
     return possible_matches[possible_matches.within(polygon)]
 
 
-# NA PÓŹNIEJ: DOKLEJENIE SKRAWKÓW, POLUZOWANIE KRYTERIÓW CUT_IS_VALID()?
-# + zoptymalizowanie względem pieces_to_final_data (n_adresses, border_weight liczymy dwa razy)
-def cut_polygon_gdf(polygon_gdf, streets, adresses,
-        min_adresses=config.default_min_adresses,
-        weights=config.default_weights,
-        top_weights_percentage=config.default_weights_percentage):
-    
-    # find possible cuts (routes between streets intersecting polygon's boundary)
-    borders = polygon_gdf["geometry"].boundary
-    borders = gpd.GeoDataFrame(geometry=borders, crs=config.univ_crs)
-    intersections = find_valid_intersections(borders, streets)  # streets można jeszcze lekko przedłużyć, żeby złapać wszystkie intersections
-    if len(intersections) < 2:  # if less than two intersections, cutting not possible
+def cut_polygon_gdf(
+    polygon_gdf: gpd.GeoDataFrame,
+    streets: gpd.GeoDataFrame,
+    adresses: gpd.GeoDataFrame,
+    min_adresses: int = config.default_min_adresses,
+    weights: pd.DataFrame = config.default_weights,
+    top_weights_percentage: float = config.default_top_weights_percentage,
+) -> list[gpd.GeoDataFrame]:
+    """
+    Recursively splits a polygon using street routes to maximize balance and weight.
+
+    Args:
+        polygon_gdf (gpd.GeoDataFrame): GeoDataFrame with a single polygon geometry.
+        streets (gpd.GeoDataFrame): GeoDataFrame of street geometries.
+        adresses (gpd.GeoDataFrame): GeoDataFrame of address points.
+        min_adresses (int): Minimum number of addresses required in each resulting part.
+        weights (pd.DataFrame): DataFrame with weights for street types.
+        top_weights_percentage (float): Fraction of top-weighted cuts to consider.
+
+    Returns:
+        list[gpd.GeoDataFrame]: List of GeoDataFrames for each resulting polygon piece.
+    """
+    if len(polygon_gdf) != 1:
+        raise ValueError("Input polygon_gdf must contain exactly one polygon")
+    if len(streets) == 0:
+        warnings.warn("No streets provided, returning the original polygon")
         return [polygon_gdf]
+    
+    # ensure streets are in the correct CRS (metrical units)
+    streets = streets.to_crs(config.metrical_crs)
+    if not isinstance(polygon_gdf.geometry.iloc[0], Polygon):
+        raise ValueError("Input polygon_gdf must contain a single Polygon geometry")
+    
+    # ensure adresses are in the correct CRS (metrical units)
+    adresses = adresses.to_crs(config.metrical_crs)
+
+    # Calculate the boundaries of the polygon and find intersections with streets
+    if not polygon_gdf.geometry.iloc[0].is_valid:
+        warnings.warn("Input polygon is not valid, returning the original polygon")
+        return [polygon_gdf]
+    borders = polygon_gdf["geometry"].boundary
+    borders = gpd.GeoDataFrame(geometry=borders, crs=config.metrical_crs)
+    intersections = find_valid_intersections(borders, streets)
+    if len(intersections) < 2:
+        return [polygon_gdf]
+    
+    # Find all routes between intersections
     cuts = find_all_routes(intersections)
+    cuts["weight"] = [
+        calculate_weight_by_buffer(
+            gpd.GeoDataFrame(geometry=[row.geometry], crs=config.metrical_crs),
+            streets,
+            weights,
+        )
+        for _, row in cuts.iterrows()
+    ]
 
-    # calculate weight of each cut
-    cuts["weight"] = [calculate_weight(row, streets, weights) for i, row in cuts.iterrows()]
-
-    # compute list of adresses inside of each polygon's component (cut by given route)
-    cuts["n_adresses"] = [None for i, row in cuts.iterrows()]
+    # add a column for a list of addresses inside each component a cut creates
+    cuts["n_adresses"] = [None for _ in cuts.iterrows()]
     polygon = polygon_gdf.geometry.iloc[0]
     for i, row in cuts.iterrows():
         line = row.geometry
         result = split(polygon, line)
-        cuts.at[i, "n_adresses"] = [len(adresses_inside_polygon(poly, adresses)) for poly in list(result.geoms)]
+        cuts.at[i, "n_adresses"] = [
+            len(adresses_inside_polygon(poly, adresses)) for poly in list(result.geoms)
+        ]
 
-    # filter out bad cuts
-    def cut_is_valid(n_adresses_list):
-        if len(n_adresses_list) < 2:  # cut must split polygon into > 1 component
+    # Define a function to validate cuts based on address counts
+    # (Check if the cut results in exactly two polygons with sufficient addresses)
+    def cut_is_valid(n_adresses_list: list[int]) -> bool:
+        if len(n_adresses_list) < 2:
             return False
-        # at least two components must contain adresses inside
-        positive_adresses = []
-        for x in n_adresses_list:
-            if x > 0:
-                positive_adresses.append(x)
+        positive_adresses = [x for x in n_adresses_list if x > 0]
         if len(positive_adresses) < 2:
             return False
-        # a cut should split the polygon into exactly two main parts (with enough adresses inside)
-        # and possibly some non-relevant scraps with 0 adresses inside
         elif len(positive_adresses) == 2:
             if positive_adresses[0] < min_adresses or positive_adresses[1] < min_adresses:
                 return False
             else:
                 return True
         else:
-            warnings.warn(f"Cut results in more than 2 polygons with adresses inside: {n_adresses_list}")
+            warnings.warn(
+                f"Cut results in more than 2 polygons with adresses inside: {n_adresses_list}"
+            )
             return False
     cuts = cuts[[cut_is_valid(lst) for lst in cuts["n_adresses"]]]
+
+    # If no valid cuts are found, return the original polygon
     if len(cuts) == 0:
         return [polygon_gdf]
-    
-    # select the heaviest cuts
-    cuts = cuts[cuts["weight"] >= cuts["weight"].quantile(1-top_weights_percentage)]
 
-    # select the most balanced cut (main parts contain the most equal number of adresses)
-    def adresses_difference(valid_adresses_list):
-        positive_adresses = []
-        for x in valid_adresses_list:
-            if x > 0:
-                positive_adresses.append(x)
+    # Select the top cuts based on weight
+    cuts = cuts[cuts["weight"] >= cuts["weight"].quantile(1 - top_weights_percentage)]
+
+    # If no cuts remain after filtering, return the original polygon
+    if len(cuts) == 0:
+        warnings.warn("No valid cuts remaining after filtering by weight, returning the original polygon")
+        return [polygon_gdf]
+
+    # select the best cut based on the difference in address counts (the smaller the better)
+    def adresses_difference(valid_adresses_list: list[int]) -> int:
+        positive_adresses = [x for x in valid_adresses_list if x > 0]
         if len(positive_adresses) != 2:
             raise Exception("Valid n_adresses list should contain exactly two positive entries")
         return abs(positive_adresses[0] - positive_adresses[1])
-    cuts["n_adresses_diff"] = [adresses_difference(row.n_adresses) for i, row in cuts.iterrows()]
+    cuts["n_adresses_diff"] = [
+        adresses_difference(row.n_adresses) for _, row in cuts.iterrows()
+    ]
     best_cut = cuts.loc[cuts["n_adresses_diff"].idxmin()]
 
-    # identify main component geometries
+    # Find the relevant polygons created by the best cut (exactly two polygons with addresses)
     relevant_polys_idxs = np.array(best_cut.n_adresses) > 0
+
     best_line = best_cut.geometry
     best_result = split(polygon, best_line)
     best_result = pd.DataFrame(list(best_result.geoms))
-    poly1 = (best_result[relevant_polys_idxs]).loc[0]
-    poly2 = (best_result[relevant_polys_idxs]).loc[1]
-    poly1 = gpd.GeoDataFrame(geometry = poly1, crs = config.univ_crs)
-    poly2 = gpd.GeoDataFrame(geometry = poly2, crs = config.univ_crs)
+    poly1 = best_result[relevant_polys_idxs].loc[0]
+    poly2 = best_result[relevant_polys_idxs].loc[1]
+    poly1 = gpd.GeoDataFrame(geometry=poly1, crs=config.metrical_crs)
+    poly2 = gpd.GeoDataFrame(geometry=poly2, crs=config.metrical_crs)
 
-    # cut the polygon recursively as long as possible
-    pieces = []
-    pieces.extend(cut_polygon_gdf(poly1, streets, adresses_inside_polygon(poly1.geometry.iloc[0], adresses),
-                      min_adresses, weights, top_weights_percentage))
-    pieces.extend(cut_polygon_gdf(poly2, streets, adresses_inside_polygon(poly2.geometry.iloc[0], adresses),
-                      min_adresses, weights, top_weights_percentage))
+    # Assign the number of addresses to each polygon
+    n_adresses_poly_1 = best_cut.n_adresses[np.where(np.array(best_cut.n_adresses) > 0)[0][0]]
+    n_adresses_poly_2 = best_cut.n_adresses[np.where(np.array(best_cut.n_adresses) > 0)[0][1]]
+    poly1["n_adresses"] = n_adresses_poly_1
+    poly2["n_adresses"] = n_adresses_poly_2
+
+    pieces: list[gpd.GeoDataFrame] = []
+    pieces.extend(
+        cut_polygon_gdf(
+            poly1,
+            streets,
+            adresses_inside_polygon(poly1.geometry.iloc[0], adresses),
+            min_adresses,
+            weights,
+            top_weights_percentage,
+        )
+    )
+    pieces.extend(
+        cut_polygon_gdf(
+            poly2,
+            streets,
+            adresses_inside_polygon(poly2.geometry.iloc[0], adresses),
+            min_adresses,
+            weights,
+            top_weights_percentage,
+        )
+    )
     return pieces
 
 
-# Helper sorter for pieces_to_final_data()
-def sort_polygons_spatially(gdf):
-    '''Returns a sorted geodataframe of polygons (from outermost to innermost, each layer clockwise)'''
+def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Sorts polygons spatially from outermost to innermost, each layer clockwise.
 
-    # compute an angle and sort clockwise (by point of origin)
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+
+    Returns:
+        gpd.GeoDataFrame: Sorted GeoDataFrame.
+    """
     def compute_angle(point, origin):
         dx = point.x - origin.x
         dy = point.y - origin.y
-        angle = np.arctan2(dy, dx)  # radians, from -pi to pi
+        angle = np.arctan2(dy, dx)
         return angle
+
     gdf_sorted = gdf.copy()
     gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
-    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid  # original polygon centroid
+    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
     gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
     gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
-    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])  # drop helper columns
+    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
 
-    # sort from outermost to innermost (identify layers)
     polygons_union = gdf_sorted.geometry.union_all()
     if not isinstance(polygons_union, Polygon):
         return gdf_sorted
     outer_border = polygons_union.exterior
     outer_polygons = gdf_sorted[gdf_sorted.geometry.touches(outer_border)].copy()
-    remaining = gdf_sorted.drop(index = outer_polygons.index)
+    remaining = gdf_sorted.drop(index=outer_polygons.index)
     gdf_sorted = outer_polygons
     while len(remaining) > 0:
         polygons_union = gdf_sorted.geometry.union_all()
         outer_border = polygons_union.boundary
         outer_polygons = remaining[remaining.geometry.touches(outer_border)].copy()
         gdf_sorted = gdf_sorted.concat(outer_polygons)
-        remaining = gdf_sorted.drop(index = outer_polygons.index)
+        remaining = gdf_sorted.drop(index=outer_polygons.index)
 
     return gdf_sorted
 
 
-def pieces_to_final_data(pieces, streets, adresses, weights=config.default_weights):
+def pieces_to_final_data(
+    pieces: list[gpd.GeoDataFrame],
+    streets: gpd.GeoDataFrame,
+    adresses: gpd.GeoDataFrame,
+    weights: pd.DataFrame = config.default_weights,
+) -> gpd.GeoDataFrame:
+    """
+    Combines polygon pieces into a final GeoDataFrame with neighbor and border information.
 
-    # make a GeoDataFrame out of polygon's pieces (list of pylogon's dataframes returned by cut_polygon_gdf())
+    Args:
+        pieces (list[gpd.GeoDataFrame]): List of GeoDataFrames for each polygon piece (returned by cut_polygon_gdf).
+        streets (gpd.GeoDataFrame): GeoDataFrame of street geometries.
+        adresses (gpd.GeoDataFrame): GeoDataFrame of address points.
+        weights (pd.DataFrame): DataFrame with weights for street types.
+
+    Returns:
+        gpd.GeoDataFrame: Final GeoDataFrame with geometry, id, neighbors, border weights, and address counts.
+    """
+
+    # turn pieces into a single GeoDataFrame
     gdf = pd.concat(pieces, ignore_index=True)
-    gdf = gpd.GeoDataFrame(gdf, geometry='geometry', crs=config.univ_crs)
 
-    # id for each component given by the spatial ordering
-    gdf = sort_polygons_spatially(gdf)  # sort clockwise, from outermost to innermost
+    # add ids based on spatial sorting
+    gdf = sort_polygons_spatially(gdf)
     gdf = gdf.reset_index(drop=True)
     gdf["id"] = gdf.index
 
-    # find neighbors for each piece
+    # add neighbors based on touching geometries
     neighbors = gpd.sjoin(gdf, gdf, how="left", predicate="touches")
-    neighbors = neighbors.drop(["index_right"], axis=1)
-    # column "neighbors" contains a list of neighbors for each polygon
     gdf["neighbors"] = neighbors.groupby(neighbors.index)["id_right"].apply(list)
-    gdf["neighbors"] = gdf["neighbors"].apply(lambda x: sorted(x) if isinstance(x, list) else [])
+    gdf["neighbors"] = gdf["neighbors"].apply(
+        lambda x: sorted([i for i in x if not pd.isna(i)]) if isinstance(x, list) else []
+    )
 
-    # calculate weight of a border between neighbots
-    def calculate_border_weight(id1, id2):
+    # add a dictionary of border weights
+    def calculate_border_weight(id1: int, id2: int) -> float:
         poly1 = gdf.geometry.loc[id1]
         poly2 = gdf.geometry.loc[id2]
         border = poly1.intersection(poly2)
-        border = gpd.GeoDataFrame(geometry=list(border.geoms), crs=config.univ_crs)
-        return calculate_weight(border, streets, weights)
-    # column "weights" contains a dictionary of form {neighbor_id: border_weight_value}
-    gdf["weights"] = gdf.apply(lambda row: {i: calculate_border_weight(row.name, i) for i in row["neighbors"]}, axis=1)
+        border = gpd.GeoDataFrame(geometry=list(border.geoms), crs=config.metrical_crs)
+        return calculate_weight_by_buffer(border, streets, weights)
+    gdf["weights"] = gdf.apply(
+        lambda row: {neigh: calculate_border_weight(row.name, neigh) for neigh in row["neighbors"]},
+        axis=1,
+    )
 
-    # number of adresses inside each component
-    gdf["n_adresses"] = gdf["geometry"].apply(lambda geom: len(adresses_inside_polygon(geom, adresses)))
-    return gdf
+    # return the final GeoDataFrame with expected crs
+    return gdf.to_crs(config.final_crs)
 
 
-# przyklad działania:
+# example usage
 adresses = gpd.read_file("sample_input_data/sample_adresses.gpkg")
 area = gpd.read_file("sample_input_data/sample_area.gpkg")
 streets = gpd.read_file("sample_input_data/sample_streets.gpkg")
 
+# ensure metrical CRS is applied
+adresses = adresses.to_crs(config.metrical_crs)
+area = area.to_crs(config.metrical_crs)
+streets = streets.to_crs(config.metrical_crs)
+
 pieces = cut_polygon_gdf(polygon_gdf=area, streets=streets, adresses=adresses)
 final_data = pieces_to_final_data(pieces, streets, adresses)
 print(final_data)
-
-
-# # pobranie terytów
-# # działa
-# url = (
-#     "https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WFS/AdministrativeBoundaries?"
-#     "Service=WFS&"
-#     "version=2.0.0&"
-#     "Request=GetFeature&"
-#     "typeNames=ms:A06_Granice_obrebow_ewidencyjnych&"
-#     "count=10&"
-#     "outputFormat=GML2"
-# )
-# gdf = gpd.read_file(url, driver = "GML")
-# print(gdf)
-
-# # nie działa
-# teryt_id='146502_8.0615'
-# url2 = (
-#     "https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WFS/AdministrativeBoundaries?"
-#     "Service=WFS&"
-#     "version=2.0.0&"
-#     "Request=GetFeature&"
-#     "typeNames=ms:A06_Granice_obrebow_ewidencyjnych&"
-#     "cql_filter=JPT_KOD_JE='{teryt_id}'&"
-#     "outputFormat=GML2"
-# )
-# gdf2 = gpd.read_file(url2)
-# print(gdf2)
