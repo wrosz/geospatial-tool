@@ -27,8 +27,6 @@ pip install -r requirements.txt
 
 Before running the routing scripts, make sure you have a local OSRM server running. See the next section for detailed instructions.
 
-Certainly! Here's the updated **Markdown snippet** for your `README.md`, with the installation instructions and a note about running the program on the sample data:
-
 ````markdown
 ## Installation
 
