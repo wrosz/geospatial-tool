@@ -23,6 +23,7 @@ def get_args(argv=None):
 
 
 def main(args):
+    '''Main function to execute the partitioning process.'''
 
     # Load configuration
     with open(Path(args.config).resolve()) as f:

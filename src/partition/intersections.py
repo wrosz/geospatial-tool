@@ -1,7 +1,7 @@
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point, LineString
-from src.logic_config import metrical_crs, min_angle, streets_extension_distance
+from src.logic_config import metrical_crs, min_angle, streets_extension_distance, close_points_treshold
 
 
 def azimuth(p1: Point, p2: Point) -> float:
@@ -109,8 +109,10 @@ def find_intersections_with_angle(
     borders = borders.to_crs(metrical_crs)
     streets = streets.to_crs(metrical_crs)
 
-    borders = borders[borders.is_valid]
+    borders = borders[borders.is_valid] 
     streets = streets[streets.is_valid]
+
+    # Extend streets to ensure intersections are found
     streets = extend_lines_in_gdf(streets, streets_extension_distance)
 
     street_sindex = streets.sindex
@@ -207,8 +209,7 @@ def remove_close_points(points: gpd.GeoDataFrame, threshold: float) -> gpd.GeoDa
 
 def find_valid_intersections(
     borders: gpd.GeoDataFrame,
-    streets: gpd.GeoDataFrame,
-    threshold: float = 50
+    streets: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
     """
     Finds and filters valid intersection points between border and street geometries.
@@ -229,5 +230,5 @@ def find_valid_intersections(
     """
     points = find_intersections_with_angle(borders, streets)
     points = remove_small_angles(points)
-    points = remove_close_points(points, threshold)
+    points = remove_close_points(points, threshold = close_points_treshold)
     return points
