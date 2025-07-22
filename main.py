@@ -19,6 +19,8 @@ def get_args(argv=None):
     parser.add_argument("--config", type=str, default="db_config.json",
                         help="Path to config file (default: arc/handle_database/config.json)")
     parser.add_argument("--teryt_id", type=str, default=None, help="Optional TERYT ID to filter addresses")
+    parser.add_argument("--output_table", type=str, default=None,
+                        help="Name of the output table to save partition results (default: specified in config)")
     return parser.parse_args(argv)
 
 
@@ -32,13 +34,15 @@ def main(args):
     # Connect to database
     engine = db_io.connect(config["connection"])
 
+    # Load weights from CSV
+    weights = db_io.load_weights_from_csv(args.weights_path)
+
     # Load data from database
     area  = db_io.load_area(engine, config["areas"], args.area_id)
     # Get bounding box of the union of area geometries
     bbox = area.union_all().bounds  # (minx, miny, maxx, maxy)
     from_crs = config["areas"]["crs"]
     print(f"Bounding box of area: {bbox}")
-    weights = db_io.load_weights_from_csv(args.weights_path)
 
     def reproject_bbox(bbox, crs_from, crs_to):
         """Reproject bounding box coordinates from one CRS to another."""
@@ -70,21 +74,10 @@ def main(args):
     print(result.head())
 
     # Save result to database
-    db_io.save_partition_result(engine, result, config["output"])
+    db_io.save_partition_result(engine, result, config["output"], args.output_table)
 
 
 if __name__ == "__main__":
 
-    import sys
-    if len(sys.argv) == 1:
-        # Debug mode
-        debug_argv = [
-            '--area_id', '146201_1.0007',
-            '--min_addresses', '10',
-            '--weights_path', r'C:\Users\17ros\Documents\PYTHON\praktyki\default_weights.csv',
-            '--teryt_id', '146201',
-        ]
-        args = get_args(debug_argv)
-    else:
-        args = get_args()
+    args = get_args()
     main(args)

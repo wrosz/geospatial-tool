@@ -179,7 +179,8 @@ def load_osm_data(
 def save_partition_result(
         engine: "sqlalchemy.engine.Engine",
         gdf: "gpd.GeoDataFrame",
-        output_cfg: dict
+        output_cfg: dict,
+        output_table: str | None = None
     ):
     """
     Saves a GeoDataFrame to a PostGIS table after reprojecting it to the specified CRS.
@@ -194,6 +195,7 @@ def save_partition_result(
     Returns:
         None
     """
+    output_table = output_table or output_cfg["table"]
     gdf = gdf.to_crs(output_cfg["crs"])
     gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
     print(f"Saved partition result to table {output_cfg["table"]}.")

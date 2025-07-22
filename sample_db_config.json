@@ -2,9 +2,9 @@
   "connection": {
     "host": "localhost",
     "port": 5432,
-    "name": "database_name",
-    "user": "postgres",
-    "password": "password123"
+    "user": "your_username",
+    "password": "your_password",
+    "database": "spatialdb"
   },
   "addresses": {
     "addresses_table": "table_with_addresses_name",

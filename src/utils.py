@@ -66,6 +66,7 @@ def calculate_weight_by_buffer(
         float: Weighted average value for the intersected geometries.
     """
 
+
     # ensure line and geoms_set are in the correct CRS (metrical units)
     line_metric = line.to_crs(logic_config.metrical_crs)
     geoms_set_metric = geoms_set.to_crs(logic_config.metrical_crs)

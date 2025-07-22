@@ -147,9 +147,9 @@ def cut_single_polygon(
             else:
                 return True
         else:
-            warnings.warn(
-                f"Cut results in more than 2 polygons with addresses inside: {n_addresses_list}"
-            )
+            # warnings.warn(
+            #     f"Cut results in more than 2 polygons with addresses inside: {n_addresses_list}"
+            # )
             return False
     cuts = cuts[[cut_is_valid(lst) for lst in cuts["n_addresses"]]]
 
@@ -365,6 +365,11 @@ def partition_polygons(
             precise_matches = streets.iloc[possible_matches_index][streets.iloc[possible_matches_index].intersects(poly)]
             street_idx.update(precise_matches.index)
         streets = streets.loc[list(street_idx)]
+
+    # filter geoms_set to keep only those where at least one column from weights.osm_key is not null
+    osm_keys = weights.osm_key.unique()
+    streets = streets[streets[osm_keys].notnull().any(axis=1)]
+    print(f"\nFiltered streets to {len(streets)} relevant geometries based on weights and spatial data.")
 
     for i, polygon in polygons.iterrows():
         print(f"\nPartitioning polygon {i + 1}/{len(polygons)}: {polygon[id_column]}")
