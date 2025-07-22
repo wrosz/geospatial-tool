@@ -1,4 +1,3 @@
-import os
 import sqlalchemy
 from sqlalchemy import create_engine, text
 import geopandas as gpd
@@ -19,7 +18,6 @@ def connect(connection_config: dict) -> sqlalchemy.engine.Engine:
     db_pass = connection_config["password"]
     conn_str = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
     return create_engine(conn_str)
-
 
 
 def load_area(
@@ -56,29 +54,28 @@ def load_area(
     return gdf
 
 
-def load_addresses(engine, addresses_cfg, teryt_id=None, bbox=None):
-    def load_addresses(
-        engine: "sqlalchemy.engine.base.Engine",
-        addresses_cfg: dict,
-        teryt_id: str = None,
-        bbox: tuple[float, float, float, float] = None
-    ) -> "gpd.GeoDataFrame":
-        """
-        Loads address records from a spatial database table using optional filters for TERYT ID and bounding box.
-        Args:
-            engine (sqlalchemy.engine.base.Engine): SQLAlchemy engine connected to the spatial database.
-            addresses_cfg (dict): Configuration dictionary containing:
-                - "addresses_table" (str): Name of the addresses table.
-                - "addresses_geom_column" (str): Name of the geometry column.
-                - "crs" (str): Coordinate reference system in the format "EPSG:XXXX".
-                - "teryt_column" (str, optional): Name of the TERYT column.
-            teryt_id (str, optional): TERYT area identifier to filter addresses by administrative area. Defaults to None.
-            bbox (tuple[float, float, float, float], optional): Bounding box (minx, miny, maxx, maxy) to spatially filter addresses. Defaults to None.
-        Returns:
-            geopandas.GeoDataFrame: GeoDataFrame containing the loaded addresses with geometry column renamed to "geometry".
-        Raises:
-            ValueError: If no addresses are found matching the given criteria.
-        """
+def load_addresses(
+    engine: "sqlalchemy.engine.base.Engine",
+    addresses_cfg: dict,
+    teryt_id: str = None,
+    bbox: tuple[float, float, float, float] = None
+) -> "gpd.GeoDataFrame":
+    """
+    Loads address records from a spatial database table using optional filters for TERYT ID and bounding box.
+    Args:
+        engine (sqlalchemy.engine.base.Engine): SQLAlchemy engine connected to the spatial database.
+        addresses_cfg (dict): Configuration dictionary containing:
+            - "addresses_table" (str): Name of the addresses table.
+            - "addresses_geom_column" (str): Name of the geometry column.
+            - "crs" (str): Coordinate reference system in the format "EPSG:XXXX".
+            - "teryt_column" (str, optional): Name of the TERYT column.
+        teryt_id (str, optional): TERYT area identifier to filter addresses by administrative area. Defaults to None.
+        bbox (tuple[float, float, float, float], optional): Bounding box (minx, miny, maxx, maxy) to spatially filter addresses. Defaults to None.
+    Returns:
+        geopandas.GeoDataFrame: GeoDataFrame containing the loaded addresses with geometry column renamed to "geometry".
+    Raises:
+        ValueError: If no addresses are found matching the given criteria.
+    """
     addresses_table_name = addresses_cfg["addresses_table"]
     addresses_geom_column_name = addresses_cfg["addresses_geom_column"]
     teryt_column_name = addresses_cfg.get("teryt_column")
@@ -117,20 +114,19 @@ def load_addresses(engine, addresses_cfg, teryt_id=None, bbox=None):
     return gdf
 
 
-def load_weights_from_csv(path):
-    def load_weights_from_csv(path: str) -> "pd.DataFrame":
-        """
-        Loads a weights table from a CSV file and validates required columns.
+def load_weights_from_csv(path: str) -> "pd.DataFrame":
+    """
+    Loads a weights table from a CSV file and validates required columns.
 
-        Args:
-            path (str): The file path to the CSV file containing the weights table.
+    Args:
+        path (str): The file path to the CSV file containing the weights table.
 
-        Returns:
-            pd.DataFrame: A pandas DataFrame containing the weights table.
+    Returns:
+        pd.DataFrame: A pandas DataFrame containing the weights table.
 
-        Raises:
-            ValueError: If any of the required columns ('osm_key', 'osm_value', 'weight') are missing in the CSV file.
-        """
+    Raises:
+        ValueError: If any of the required columns ('osm_key', 'osm_value', 'weight') are missing in the CSV file.
+    """
     weights_table = pd.read_csv(path)
     for colname in ["osm_key", "osm_value", "weight"]:
         if colname not in weights_table.columns:
@@ -139,30 +135,29 @@ def load_weights_from_csv(path):
     return weights_table
 
 
-def load_osm_data(engine, osm_data_cfg, bbox=None):
-    def load_osm_data(
+def load_osm_data(
         engine: "sqlalchemy.engine.base.Engine",
         osm_data_cfg: dict,
         bbox: tuple[float, float, float, float] | None = None
-    ) -> "geopandas.GeoDataFrame":
-        """
-        Loads OpenStreetMap (OSM) data from a database table into a GeoDataFrame, optionally filtering by a bounding box.
+    ) -> "gpd.GeoDataFrame":
+    """
+    Loads OpenStreetMap (OSM) data from a database table into a GeoDataFrame, optionally filtering by a bounding box.
 
-        Args:
-            engine (sqlalchemy.engine.base.Engine): SQLAlchemy engine connected to the database.
-            osm_data_cfg (dict): Configuration dictionary containing:
-                - 'table' (str): Name of the OSM data table.
-                - 'geom_column' (str): Name of the geometry column.
-                - 'crs' (str): Coordinate reference system in the format 'EPSG:XXXX'.
-            bbox (tuple[float, float, float, float] | None, optional): Bounding box to filter the data,
-                specified as (minx, miny, maxx, maxy). If None, no spatial filter is applied.
+    Args:
+        engine (sqlalchemy.engine.base.Engine): SQLAlchemy engine connected to the database.
+        osm_data_cfg (dict): Configuration dictionary containing:
+            - 'table' (str): Name of the OSM data table.
+            - 'geom_column' (str): Name of the geometry column.
+            - 'crs' (str): Coordinate reference system in the format 'EPSG:XXXX'.
+        bbox (tuple[float, float, float, float] | None, optional): Bounding box to filter the data,
+            specified as (minx, miny, maxx, maxy). If None, no spatial filter is applied.
 
-        Returns:
-            geopandas.GeoDataFrame: GeoDataFrame containing the loaded OSM data.
+    Returns:
+        geopandas.GeoDataFrame: GeoDataFrame containing the loaded OSM data.
 
-        Raises:
-            ValueError: If no data is found in the specified table (and bounding box, if provided).
-        """
+    Raises:
+        ValueError: If no data is found in the specified table (and bounding box, if provided).
+    """
     query = f"SELECT * FROM {osm_data_cfg['table']}"
     if bbox is not None:
         # bbox: (minx, miny, maxx, maxy)
@@ -181,25 +176,24 @@ def load_osm_data(engine, osm_data_cfg, bbox=None):
     return gdf
 
 
-def save_partition_result(engine, gdf, output_cfg):
-    def save_partition_result(
+def save_partition_result(
         engine: "sqlalchemy.engine.Engine",
         gdf: "gpd.GeoDataFrame",
         output_cfg: dict
     ):
-        """
-        Saves a GeoDataFrame to a PostGIS table after reprojecting it to the specified CRS.
+    """
+    Saves a GeoDataFrame to a PostGIS table after reprojecting it to the specified CRS.
 
-        Args:
-            engine (sqlalchemy.engine.Engine): SQLAlchemy engine connected to the target database.
-            gdf (geopandas.GeoDataFrame): The GeoDataFrame containing spatial data to be saved.
-            output_cfg (dict): Configuration dictionary with the following keys:
-                - "crs" (str or dict): The target coordinate reference system for reprojection.
-                - "table" (str): The name of the target table in the database.
+    Args:
+        engine (sqlalchemy.engine.Engine): SQLAlchemy engine connected to the target database.
+        gdf (geopandas.GeoDataFrame): The GeoDataFrame containing spatial data to be saved.
+        output_cfg (dict): Configuration dictionary with the following keys:
+            - "crs" (str or dict): The target coordinate reference system for reprojection.
+            - "table" (str): The name of the target table in the database.
 
-        Returns:
-            None
-        """
+    Returns:
+        None
+    """
     gdf = gdf.to_crs(output_cfg["crs"])
     gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
     print(f"Saved partition result to table {output_cfg["table"]}.")

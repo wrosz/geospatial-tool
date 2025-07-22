@@ -2,26 +2,26 @@
   "connection": {
     "host": "localhost",
     "port": 5432,
-    "name": "emapa",
+    "name": "database_name",
     "user": "postgres",
-    "password": "master15"
+    "password": "password123"
   },
   "addresses": {
-    "addresses_table": "public.adresy_warszawski_zachodni",
-    "addresses_geom_column": "wkb_geometry",
+    "addresses_table": "table_with_addresses_name",
+    "addresses_geom_column": "geom",
     "teryt_column": "teryt",
-    "crs": "EPSG:2180"
+    "crs": "EPSG:4326"
   },
   "areas": {
-    "area_table": "dbo.shapes",
-    "area_id_column": "unit_code",
+    "area_table": "table_with_areas_name",
+    "area_id_column": "id",
     "area_geom_column": "geom",
     "crs": "EPSG:4326"
 },
   "osm_data": {
-    "table": "osm.osm_line",
+    "table": "table_with_osm_data",
     "geom_column": "way",
-    "crs": "EPSG:3857"
+    "crs": "EPSG:4326"
   },
   "output": {
     "table": "cut_results_123",

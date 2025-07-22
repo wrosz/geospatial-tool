@@ -16,7 +16,7 @@ def get_args(argv=None):
     parser.add_argument("--area_id", type=str, required=True, help="ID of the area to cut")
     parser.add_argument("--min_addresses", type=int, required=True, help="Minimum number of addresses per piece")
     parser.add_argument("--weights_path", type=str, required=True, help="Path to the weights CSV file")
-    parser.add_argument("--config", type=str, default="src/handle_database/db_config.json",
+    parser.add_argument("--config", type=str, default="db_config.json",
                         help="Path to config file (default: arc/handle_database/config.json)")
     parser.add_argument("--teryt_id", type=str, default=None, help="Optional TERYT ID to filter addresses")
     return parser.parse_args(argv)

@@ -25,4 +25,7 @@ build/
 dist/
 *.egg-info/
 
+# actual database configuration
+db_config.json
+
 
