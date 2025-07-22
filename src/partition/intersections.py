@@ -1,13 +1,12 @@
 import geopandas as gpd
 import numpy as np
-import config
 from shapely.geometry import Point, LineString
-from typing import Union
+from src.logic_config import metrical_crs, min_angle, streets_extension_distance
 
 
 def azimuth(p1: Point, p2: Point) -> float:
     """
-    Returns the azimuth (bearing) in degrees between two points, measured clockwise from the north.
+    Returns the azimuth (bearing) in degrees between two points (expected to be in metrical units), measured clockwise from the north.
 
     Args:
         p1 (Point): Starting point.
@@ -22,13 +21,53 @@ def azimuth(p1: Point, p2: Point) -> float:
     return angle
 
 
+def extend_lines_in_gdf(gdf: gpd.GeoDataFrame, distance: float) -> gpd.GeoDataFrame:
+    """
+    Extend both ends of all LineString geometries in a GeoDataFrame by a given distance.
+
+    Parameters:
+        gdf (GeoDataFrame): Input GeoDataFrame with LineStrings.
+        distance (float): Distance in the same units as the CRS (meters for projected CRS).
+
+    Returns:
+        GeoDataFrame: A new GeoDataFrame with extended LineStrings.
+    """
+
+    def extend_linestring(line):
+        if not isinstance(line, LineString) or len(line.coords) < 2:
+            return line  # Return unchanged for non-LineStrings or degenerate lines
+
+        coords = np.array(line.coords)
+
+        # Extend start
+        v_start = coords[0] - coords[1]
+        v_start /= np.linalg.norm(v_start)
+        new_start = coords[0] + distance * v_start
+
+        # Extend end
+        v_end = coords[-1] - coords[-2]
+        v_end /= np.linalg.norm(v_end)
+        new_end = coords[-1] + distance * v_end
+
+        new_coords = [tuple(new_start)] + [tuple(pt) for pt in coords[1:-1]] + [tuple(new_end)]
+        return LineString(new_coords)
+
+    # Ensure CRS is projected (not lat/lon)
+    if gdf.crs is None or gdf.crs.is_geographic:
+        raise ValueError("GeoDataFrame must have a projected CRS (e.g., EPSG:3857).")
+
+    gdf_extended = gdf.copy()
+    gdf_extended["geometry"] = gdf_extended["geometry"].apply(extend_linestring)
+
+    return gdf_extended
+
 
 def find_intersections_with_angle(
     borders: gpd.GeoDataFrame,
     streets: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
     """
-    Finds intersection points between cadastral borders and streets, 
+    Finds intersection points between area borders and streets, 
     and computes the angle between them at each intersection.
 
     Reprojects both layers to a projected (metrical) CRS for geometric operations.
@@ -67,19 +106,21 @@ def find_intersections_with_angle(
         return 360 - diff if diff > 180 else diff
 
     # Reproject to a metrical CRS for all geometric calculations
-    borders = borders.to_crs(config.metrical_crs)
-    streets = streets.to_crs(config.metrical_crs)
+    borders = borders.to_crs(metrical_crs)
+    streets = streets.to_crs(metrical_crs)
 
     borders = borders[borders.is_valid]
     streets = streets[streets.is_valid]
+    streets = extend_lines_in_gdf(streets, streets_extension_distance)
 
     street_sindex = streets.sindex
     intersections = []
 
     for _, b_row in borders.iterrows():
         # Spatial index: find streets intersecting the bounding box of the border
-        possible_matches_index = list(street_sindex.intersection(b_row.geometry.bounds))
+        possible_matches_index = list(street_sindex.intersection(b_row.geometry.buffer(streets_extension_distance).bounds))
         possible_matches = streets.iloc[possible_matches_index]
+        possible_matches = extend_lines_in_gdf(possible_matches, streets_extension_distance)
 
         for _, s_row in possible_matches.iterrows():
             if b_row.geometry.intersects(s_row.geometry):
@@ -100,7 +141,7 @@ def find_intersections_with_angle(
                 except Exception:
                     continue
 
-    gdf = gpd.GeoDataFrame(intersections, geometry=[f["geometry"] for f in intersections], crs=config.metrical_crs)
+    gdf = gpd.GeoDataFrame(intersections, geometry=[f["geometry"] for f in intersections], crs=metrical_crs)
     gdf["angle"] = [f["angle"] for f in intersections]
 
     return gdf
@@ -119,8 +160,8 @@ def remove_small_angles(intersections: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         GeoDataFrame: Filtered intersections.
     """
     return intersections[
-        (intersections.angle >= config.min_angle) &
-        (intersections.angle <= 180 - config.min_angle)
+        (intersections.angle >= min_angle) &
+        (intersections.angle <= 180 - min_angle)
     ]
 
 
@@ -137,8 +178,8 @@ def remove_close_points(points: gpd.GeoDataFrame, threshold: float) -> gpd.GeoDa
     Returns:
         GeoDataFrame: Filtered set of points.
     """
-    if points.crs != config.metrical_crs:
-        points = points.to_crs(config.metrical_crs)
+    if points.crs != metrical_crs:
+        points = points.to_crs(metrical_crs)
 
     geometries = points.geometry
     sindex = geometries.sindex

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # Virtual environment
 venv/
@@ -23,10 +24,5 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-
-# Ignore folders you don't want to upload:
-input_data
-output_data
-qgis
 
 
