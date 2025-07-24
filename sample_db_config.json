@@ -42,9 +42,9 @@
       "teryt_column": null,
       "crs": "EPSG:XXXX",
       "time_period": {
-        "column_name": "your_time_column",
-        "start": "YYYY-MM-DD",
-        "end": "YYYY-MM-DD"
+        "column_name": "your_time_column", 
+        "start": "YYYY-MM-DD",  
+        "end": "YYYY-MM-DD" 
       }
     },
     "areas": {

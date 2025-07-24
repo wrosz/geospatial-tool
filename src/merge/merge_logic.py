@@ -31,8 +31,7 @@ def calculate_points_centroid(points):
     return centroid_gdf.geometry.iloc[0]
 
 
-
-def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresses, id_col: str = "id"):
+def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresses, id_col: str = "id", n_days: int = 1):
     """
     Merges polygons in a GeoDataFrame based on the shortest route between them.
     
@@ -42,10 +41,15 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         min_addresses (int): Minimum number of addresses required for merging.
         max_addresses (int): Maximum number of addresses allowed in a merged polygon.
         id_col (str): Column name in gdf_new that contains unique identifiers for polygons.
-    
+        n_days (int): Number of days to consider for merging.
+
     Returns:
         gpd.GeoDataFrame: Merged GeoDataFrame with polygons that have enough addresses.
     """
+
+    min_addresses = min_addresses * n_days
+    max_addresses = max_addresses * n_days
+
     if min_addresses <= 0:
         raise ValueError("min_addresses must be greater than 0")
 
@@ -146,9 +150,9 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         )
         gdf_new = gdf_new.drop([row.name, best_neighbor.name])
         gdf_new = pd.concat([new_row, gdf_new])
-        
-    
     gdf_new.drop(columns=["addresses_centroid", "can_be_merged"], inplace=True)
+    gdf_new["avg_addresses"] = gdf_new["n_addresses"] / n_days
+    gdf_new.drop(columns=["n_addresses"], inplace=True)
     return gdf_new
 
 

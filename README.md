@@ -99,16 +99,15 @@ The connection details (host, port, user, password, database name) are specified
     "password": "your_password",
     "database": "spatialdb"
   },
-  "areas": { ... },
-  "addresses": { ... },
-  "osm_data": { ... },
-  "output": { ... }
+  "weights": {...},
+  "data_for_partition": {...},
+  ...
 }
 ```
 
 **Note:** You must provide the correct table names and CRS (coordinate reference system) for your data in the config file. See the sample config for details.
 
-The calculated cuts (partition results) will be saved to the output table specified in your config file under the `output` section. Make sure this table name is set and you have write access to the database.
+The calculated cuts (partition or merge results) will be saved to the output table specified in your config file under the `output` section. Make sure this table name is set and you have write access to the database.
 
 
 ---

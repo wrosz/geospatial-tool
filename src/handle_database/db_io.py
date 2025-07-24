@@ -72,7 +72,6 @@ def load_addresses(
             - "teryt_column" (str, optional): Name of the TERYT column.
             - "date_column" (str, optional): Name of the date column for filtering by time period.
         teryt_id (str, optional): TERYT area identifier to filter addresses by administrative area. Defaults to None.
-        time_period (tuple[str, str], optional): Tuple of (start_date, end_date) to filter addresses by date. Defaults to None.
         bbox (tuple[float, float, float, float], optional): Bounding box (minx, miny, maxx, maxy) to spatially filter addresses. Defaults to None.
     Returns:
         geopandas.GeoDataFrame: GeoDataFrame containing the loaded addresses with geometry column renamed to "geometry".
@@ -116,15 +115,15 @@ def load_addresses(
     gdf = gdf.rename_geometry("geometry")
     print(
         f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
-        f"{'\nteryt_id=' + str(teryt_id) if teryt_id is not None else ''}"
-        f"{'\ntime_period=' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-        f"{'\nbbox=' + str(bbox) if bbox is not None else ''}"
+        f"{'\nteryt_id = ' + str(teryt_id) if teryt_id is not None else ''}"
+        f"{'\ntime_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+        f"{'\nbbox = ' + str(bbox) if bbox is not None else ''}"
     )
     if gdf.empty:
         raise ValueError(f"No addresses found in table {addresses_table_name} with the given criteria: "
-                 f"{'\nteryt_id=' + str(teryt_id) if teryt_id is not None else ''} "
-                 f"{'\ntime_period=' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-                 f"{'\nbbox=' + str(bbox) if bbox is not None else ''}.")
+                 f"{'\nteryt_id = ' + str(teryt_id) if teryt_id is not None else ''} "
+                 f"{'\ntime_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+                 f"{'\nbbox = ' + str(bbox) if bbox is not None else ''}.")
     return gdf
 
 
