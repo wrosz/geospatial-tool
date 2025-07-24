@@ -2,6 +2,7 @@ import sqlalchemy
 from sqlalchemy import create_engine, text
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import box
 
 
 def connect(connection_config: dict) -> sqlalchemy.engine.Engine:
@@ -61,7 +62,7 @@ def load_addresses(
     bbox: tuple[float, float, float, float] = None
 ) -> "gpd.GeoDataFrame":
     """
-    Loads address records from a spatial database table using optional filters for TERYT ID and bounding box.
+    Loads address records from a spatial database table using optional filters for TERYT ID, bounding box, and time period.
     Args:
         engine (sqlalchemy.engine.base.Engine): SQLAlchemy engine connected to the spatial database.
         addresses_cfg (dict): Configuration dictionary containing:
@@ -69,7 +70,9 @@ def load_addresses(
             - "addresses_geom_column" (str): Name of the geometry column.
             - "crs" (str): Coordinate reference system in the format "EPSG:XXXX".
             - "teryt_column" (str, optional): Name of the TERYT column.
+            - "date_column" (str, optional): Name of the date column for filtering by time period.
         teryt_id (str, optional): TERYT area identifier to filter addresses by administrative area. Defaults to None.
+        time_period (tuple[str, str], optional): Tuple of (start_date, end_date) to filter addresses by date. Defaults to None.
         bbox (tuple[float, float, float, float], optional): Bounding box (minx, miny, maxx, maxy) to spatially filter addresses. Defaults to None.
     Returns:
         geopandas.GeoDataFrame: GeoDataFrame containing the loaded addresses with geometry column renamed to "geometry".
@@ -79,6 +82,7 @@ def load_addresses(
     addresses_table_name = addresses_cfg["addresses_table"]
     addresses_geom_column_name = addresses_cfg["addresses_geom_column"]
     teryt_column_name = addresses_cfg.get("teryt_column")
+    date_column_name = addresses_cfg.get("date_column")
 
     where_clauses = []
     params = {}
@@ -86,6 +90,14 @@ def load_addresses(
     if teryt_id is not None and teryt_column_name is not None:
         where_clauses.append(f"{teryt_column_name}::text LIKE :area_id")
         params["area_id"] = f"{teryt_id}%"
+
+    time_period = addresses_cfg.get("time_period")
+    date_column_name = time_period.get("column_name") if time_period else date_column_name
+
+    if time_period is not None and date_column_name is not None:
+        where_clauses.append(f"{date_column_name} BETWEEN :start_date AND :end_date")
+        params["start_date"] = time_period["start"]
+        params["end_date"] = time_period["end"]
 
     if bbox is not None:
         # bbox: (minx, miny, maxx, maxy)
@@ -103,18 +115,20 @@ def load_addresses(
     gdf = gpd.read_postgis(query, engine, geom_col=addresses_geom_column_name, params=params)
     gdf = gdf.rename_geometry("geometry")
     print(
-        f"Loaded {len(gdf)} addresses from table {addresses_table_name}."
-        f"{' teryt_id=' + str(teryt_id) if teryt_id is not None else ''}"
-        f"{', bbox=' + str(bbox) if bbox is not None else ''}"
+        f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
+        f"{'\nteryt_id=' + str(teryt_id) if teryt_id is not None else ''}"
+        f"{'\ntime_period=' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+        f"{'\nbbox=' + str(bbox) if bbox is not None else ''}"
     )
     if gdf.empty:
         raise ValueError(f"No addresses found in table {addresses_table_name} with the given criteria: "
-                 f"{'teryt_id=' + str(teryt_id) if teryt_id is not None else ''} "
-                 f"{'bbox=' + str(bbox) if bbox is not None else ''}.")
+                 f"{'\nteryt_id=' + str(teryt_id) if teryt_id is not None else ''} "
+                 f"{'\ntime_period=' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+                 f"{'\nbbox=' + str(bbox) if bbox is not None else ''}.")
     return gdf
 
 
-def load_weights_from_csv(path: str) -> "pd.DataFrame":
+def load_weights_from_csv(path: str | None, weights_config: dict) -> "pd.DataFrame":
     """
     Loads a weights table from a CSV file and validates required columns.
 
@@ -127,6 +141,9 @@ def load_weights_from_csv(path: str) -> "pd.DataFrame":
     Raises:
         ValueError: If any of the required columns ('osm_key', 'osm_value', 'weight') are missing in the CSV file.
     """
+
+    if path is None:
+        path = weights_config["default_weights_path"]
     weights_table = pd.read_csv(path)
     for colname in ["osm_key", "osm_value", "weight"]:
         if colname not in weights_table.columns:
@@ -169,11 +186,50 @@ def load_osm_data(
         query += f" WHERE {bbox_sql}"
     gdf = gpd.read_postgis(query, engine, geom_col=osm_data_cfg["geom_column"])
     if gdf.empty:
-        raise ValueError(f"No OSM data found in table {osm_data_cfg['table']}.")
+        raise ValueError(f"\nNo OSM data found in table {osm_data_cfg['table']}.")
     print(f"Loaded OSM data ({len(gdf)} rows) from table {osm_data_cfg['table']}."
-          f"{' with bbox=' + str(bbox) if bbox is not None else ''}")
+          f"{'\nbbox=' + str(bbox) if bbox is not None else ''}")
     gdf = gdf.rename_geometry("geometry")
     return gdf
+
+
+def load_all_data_with_bbox(engine, config, args):
+    '''Loads all relevant data from the database within a specified bounding box.'''
+
+    print("\nLoading areas...")
+    # Load data from database
+    area  = load_area(engine, config["areas"], args.area_id)
+    # Get bounding box of the union of area geometries
+    bbox = area.union_all().bounds  # (minx, miny, maxx, maxy)
+    from_crs = config["areas"]["crs"]
+    print(f"Bounding box of area: {bbox}")
+
+    def reproject_bbox(bbox, crs_from, crs_to):
+        """Reproject bounding box coordinates from one CRS to another."""
+        bbox_gdf = gpd.GeoDataFrame(geometry=[box(*bbox)], crs=crs_from)
+        bbox_gdf = bbox_gdf.to_crs(crs_to)
+        return bbox_gdf.geometry[0].bounds
+    
+    # Load addresses using bbox and teryt_id if provided
+    print("\nLoading adresses...")
+
+    bbox_reprojected = reproject_bbox(bbox, from_crs, config["addresses"]["crs"])
+    teryt_id = args.teryt_id if args.teryt_id else None
+
+    addresses = load_addresses(engine, config["addresses"], teryt_id=teryt_id, bbox=bbox_reprojected)
+    if addresses.empty:
+        print(f"No addresses found for TERYT ID {teryt_id} in bbox {bbox}, loading all addresses in bbox.")
+        addresses = load_addresses(engine, config["addresses"], bbox=bbox)
+
+    if config.get("osm_data") is None:
+        return {"area": area, "addresses": addresses}
+
+    # Load OSM data using bounding box
+    print("\nLoading OpenStreetMap data...")
+    bbox_reprojected = reproject_bbox(bbox, from_crs, config["osm_data"]["crs"])
+    osm_data = load_osm_data(engine, config["osm_data"], bbox=bbox_reprojected)
+
+    return {"area": area, "addresses": addresses, "osm_data": osm_data}
 
 
 def save_partition_result(
@@ -198,4 +254,4 @@ def save_partition_result(
     output_table = output_table or output_cfg["table"]
     gdf = gdf.to_crs(output_cfg["crs"])
     gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
-    print(f"Saved partition result to table {output_cfg["table"]}.")
+    print(f"\nSaved partition result to table {output_cfg["table"]}.")

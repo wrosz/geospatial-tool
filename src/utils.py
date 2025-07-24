@@ -3,7 +3,10 @@ import requests
 import polyline
 import warnings
 import pandas as pd
-from shapely.geometry import Polygon, LineString
+from shapely.geometry import Polygon, LineString, MultiLineString
+from shapely.ops import linemerge
+import numpy as np
+from shapely.geometry import MultiPoint
 
 import src.logic_config as logic_config
 
@@ -113,7 +116,7 @@ def calculate_weight_by_buffer(
         relevant_geoms.total_weight = relevant_geoms.total_weight.values + to_add.weight.fillna(0).values
     
     if sum(relevant_geoms.intersect_length) == 0:
-        warnings.warn("Total intersect length is zero, returning 0.0 for weight.")  
+        # warnings.warn("Total intersect length is zero, returning 0.0 for weight.")  
         return 0.0
     return float(
         sum(relevant_geoms.total_weight * relevant_geoms.intersect_length)
@@ -139,3 +142,84 @@ def addresses_inside_polygon(
         addresses.geometry.sindex.query(polygon, predicate="contains")
     ]
     return possible_matches[possible_matches.within(polygon)]
+
+
+
+def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Sorts polygons spatially from outermost to innermost, each layer clockwise.
+
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+
+    Returns:
+        gpd.GeoDataFrame: Sorted GeoDataFrame.
+    """
+    def compute_angle(point, origin):
+        dx = point.x - origin.x
+        dy = point.y - origin.y
+        angle = np.arctan2(dy, dx)
+        return angle
+
+    gdf_sorted = gdf.copy()
+    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
+    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
+    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
+    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
+    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
+
+    polygons_union = gdf_sorted.geometry.union_all()
+    if not isinstance(polygons_union, Polygon):
+        return gdf_sorted
+    outer_border = polygons_union.exterior
+    outer_polygons = gdf_sorted[gdf_sorted.geometry.touches(outer_border)].copy()
+    remaining = gdf_sorted.drop(index=outer_polygons.index)
+    gdf_sorted = outer_polygons
+    while len(remaining) > 0:
+        polygons_union = gdf_sorted.geometry.union_all()
+        outer_border = polygons_union.boundary
+        outer_polygons = remaining[remaining.geometry.touches(outer_border)].copy()
+        gdf_sorted = pd.concat([gdf_sorted, outer_polygons], ignore_index=True)
+        remaining = remaining.drop(index=outer_polygons.index)
+
+    return gdf_sorted
+
+
+
+def shared_border(poly1, poly2):
+    """
+    Check if two GeoDataFrames (each containing one polygon) share a border.
+
+    Args:
+        poly1: Polygon
+        poly2: Polygon
+    Returns:
+        LineString or MultiLineString: The shared border if it exists, otherwise None.
+    """
+    
+    border = poly1.boundary.intersection(poly2.boundary)
+    if isinstance(border, MultiLineString):
+        border = linemerge(border)
+    if border.is_empty:
+        return None
+    return border
+
+
+def extend_linestring(line, distance: float) -> LineString:
+        if not isinstance(line, LineString) or len(line.coords) < 2:
+            return line  # Return unchanged for non-LineStrings or degenerate lines
+
+        coords = np.array(line.coords)
+
+        # Extend start
+        v_start = coords[0] - coords[1]
+        v_start /= np.linalg.norm(v_start)
+        new_start = coords[0] + distance * v_start
+
+        # Extend end
+        v_end = coords[-1] - coords[-2]
+        v_end /= np.linalg.norm(v_end)
+        new_end = coords[-1] + distance * v_end
+
+        new_coords = [tuple(new_start)] + [tuple(pt) for pt in coords[1:-1]] + [tuple(new_end)]
+        return LineString(new_coords)

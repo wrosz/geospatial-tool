@@ -1,83 +1,46 @@
-import geopandas as gpd
-import pandas as pd
-import numpy as np
-import json
 import argparse
-from pathlib import Path
-from shapely.geometry import box
+import sys
+import os
 
-import src.handle_database.db_io as db_io
-from src.partition.cuts import partition_polygons
+from src.partition.run_partition import run_partition
+from src.merge.run_merge import run_merge
 
 
-def get_args(argv=None):
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Cut geometries by area ID using OSM data and weights")
-    parser.add_argument("--area_id", type=str, required=True, help="ID of the area to cut")
-    parser.add_argument("--min_addresses", type=int, required=True, help="Minimum number of addresses per piece")
-    parser.add_argument("--weights_path", type=str, required=True, help="Path to the weights CSV file")
-    parser.add_argument("--config", type=str, default="db_config.json",
+
+def main():
+    if len(sys.argv) == 1:
+        sys.argv.extend(["cut",
+            "--area_id" ,"146201_1.0009", "--min_addresses","50"
+        ])
+
+
+    # Common parser for shared arguments
+    common_parser = argparse.ArgumentParser(add_help=False)
+    common_parser.add_argument("--teryt_id", type=str, default=None, help="Optional TERYT ID to filter addresses")
+    common_parser.add_argument("--config", type=str, default="db_config.json",
                         help="Path to config file (default: arc/handle_database/config.json)")
-    parser.add_argument("--teryt_id", type=str, default=None, help="Optional TERYT ID to filter addresses")
-    parser.add_argument("--output_table", type=str, default=None,
-                        help="Name of the output table to save partition results (default: specified in config)")
-    return parser.parse_args(argv)
+    common_parser.add_argument("--output_table", type=str, default=None,
+                    help="Name of the output table to save partition results (default: specified in config)")
 
+    parser = argparse.ArgumentParser(description="Cut or merge geometries by area ID using OSM data and weights")
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Action to perform: cut or merge")
 
-def main(args):
-    '''Main function to execute the partitioning process.'''
-
-    # Load configuration
-    with open(Path(args.config).resolve()) as f:
-        config = json.load(f)
+    cut_parser = subparsers.add_parser("cut", help="Cut geometries into smaller pieces", parents=[common_parser])
+    cut_parser.add_argument("--area_id", type=str, required=True, help="ID prefixes of the areas to cut")
+    cut_parser.add_argument("--min_addresses", type=float, required=True, help="Minimum number of addresses per piece")
+    cut_parser.add_argument("--weights_path", type=str, default=None, help="Path to the weights CSV file (default: specified config)")
+    cut_parser.set_defaults(func=run_partition)
     
-    # Connect to database
-    engine = db_io.connect(config["connection"])
-
-    # Load weights from CSV
-    weights = db_io.load_weights_from_csv(args.weights_path)
-
-    # Load data from database
-    area  = db_io.load_area(engine, config["areas"], args.area_id)
-    # Get bounding box of the union of area geometries
-    bbox = area.union_all().bounds  # (minx, miny, maxx, maxy)
-    from_crs = config["areas"]["crs"]
-    print(f"Bounding box of area: {bbox}")
-
-    def reproject_bbox(bbox, crs_from, crs_to):
-        """Reproject bounding box coordinates from one CRS to another."""
-        bbox_gdf = gpd.GeoDataFrame(geometry=[box(*bbox)], crs=crs_from)
-        bbox_gdf = bbox_gdf.to_crs(crs_to)
-        return bbox_gdf.geometry[0].bounds
-
-    # Load OSM data using bounding box
-    bbox_reprojected = reproject_bbox(bbox, from_crs, config["osm_data"]["crs"])
-    osm_data = db_io.load_osm_data(engine, config["osm_data"], bbox=bbox_reprojected)
-
-    # Load addresses using bbox and teryt_id if provided
-    bbox_reprojected = reproject_bbox(bbox, from_crs, config["addresses"]["crs"])
-    teryt_id = args.teryt_id if args.teryt_id else args.area_id
-    addresses = db_io.load_addresses(engine, config["addresses"], teryt_id=teryt_id, bbox=bbox_reprojected)
-    if addresses.empty:
-        print(f"No addresses found for TERYT ID {teryt_id} in bbox {bbox}, loading all addresses in bbox.")
-        addresses = db_io.load_addresses(engine, config["addresses"], bbox=bbox)
-
-    result = partition_polygons(
-        polygons=area,
-        streets=osm_data,
-        addresses=addresses,
-        min_addresses=args.min_addresses,
-        weights=weights,
-        id_column=config["areas"]["area_id_column"]
-    )
-
-    print(result.head())
-
-    # Save result to database
-    db_io.save_partition_result(engine, result, config["output"], args.output_table)
+    merge_parser = subparsers.add_parser("merge", help="Merge geometries based on shortest route", parents=[common_parser])
+    merge_parser.add_argument("--min_addresses", type=float, required=True, help="Minimum number of addresses (daily average from time period specified in config) required for merging")
+    merge_parser.add_argument("--max_addresses", type=float, required=True, help="Maximum number of addresses (daily average from time period specified in config) allowed in a merged polygon")
+    merge_parser.add_argument("--area_id", type=str, required=True, help="ID prefixes of the areas to merge")
+    merge_parser.set_defaults(func=run_merge)
+    
+    args = parser.parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":
+    main()
 
-    args = get_args()
-    main(args)

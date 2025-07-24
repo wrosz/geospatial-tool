@@ -2,6 +2,7 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point, LineString
 from src.logic_config import metrical_crs, min_angle, streets_extension_distance, close_points_treshold
+from src.utils import extend_linestring
 
 
 def azimuth(p1: Point, p2: Point) -> float:
@@ -33,31 +34,12 @@ def extend_lines_in_gdf(gdf: gpd.GeoDataFrame, distance: float) -> gpd.GeoDataFr
         GeoDataFrame: A new GeoDataFrame with extended LineStrings.
     """
 
-    def extend_linestring(line):
-        if not isinstance(line, LineString) or len(line.coords) < 2:
-            return line  # Return unchanged for non-LineStrings or degenerate lines
-
-        coords = np.array(line.coords)
-
-        # Extend start
-        v_start = coords[0] - coords[1]
-        v_start /= np.linalg.norm(v_start)
-        new_start = coords[0] + distance * v_start
-
-        # Extend end
-        v_end = coords[-1] - coords[-2]
-        v_end /= np.linalg.norm(v_end)
-        new_end = coords[-1] + distance * v_end
-
-        new_coords = [tuple(new_start)] + [tuple(pt) for pt in coords[1:-1]] + [tuple(new_end)]
-        return LineString(new_coords)
-
     # Ensure CRS is projected (not lat/lon)
     if gdf.crs is None or gdf.crs.is_geographic:
         raise ValueError("GeoDataFrame must have a projected CRS (e.g., EPSG:3857).")
 
     gdf_extended = gdf.copy()
-    gdf_extended["geometry"] = gdf_extended["geometry"].apply(extend_linestring)
+    gdf_extended["geometry"] = gdf_extended["geometry"].apply(lambda geom: extend_linestring(geom, distance))
 
     return gdf_extended
 
@@ -232,3 +214,4 @@ def find_valid_intersections(
     points = remove_small_angles(points)
     points = remove_close_points(points, threshold = close_points_treshold)
     return points
+

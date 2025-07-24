@@ -4,12 +4,12 @@ import numpy as np
 
 import warnings
 
-from shapely.geometry import LineString, Polygon, MultiPoint
+from shapely.geometry import Polygon, MultiLineString
 from shapely.ops import split
 
-from src.partition.intersections import find_valid_intersections
-from src.logic_config import default_top_weights_percentage, metrical_crs
-from src.utils import calculate_weight_by_buffer, addresses_inside_polygon, get_osrm_route
+from src.partition.intersections_logic import find_valid_intersections
+from src.logic_config import default_top_weights_percentage, metrical_crs, streets_extension_distance
+from src.utils import calculate_weight_by_buffer, addresses_inside_polygon, get_osrm_route, shared_border, sort_polygons_spatially, extend_linestring
 
 
 def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -48,6 +48,8 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         return routes_gdf
     else:
         return gpd.GeoDataFrame(columns=["geometry", "duration"], crs="EPSG:4326")
+    
+
 
 
 def cut_single_polygon(
@@ -222,44 +224,6 @@ def cut_single_polygon(
     return pieces
 
 
-def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """
-    Sorts polygons spatially from outermost to innermost, each layer clockwise.
-
-    Args:
-        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
-
-    Returns:
-        gpd.GeoDataFrame: Sorted GeoDataFrame.
-    """
-    def compute_angle(point, origin):
-        dx = point.x - origin.x
-        dy = point.y - origin.y
-        angle = np.arctan2(dy, dx)
-        return angle
-
-    gdf_sorted = gdf.copy()
-    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
-    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
-    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
-    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
-    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
-
-    polygons_union = gdf_sorted.geometry.union_all()
-    if not isinstance(polygons_union, Polygon):
-        return gdf_sorted
-    outer_border = polygons_union.exterior
-    outer_polygons = gdf_sorted[gdf_sorted.geometry.touches(outer_border)].copy()
-    remaining = gdf_sorted.drop(index=outer_polygons.index)
-    gdf_sorted = outer_polygons
-    while len(remaining) > 0:
-        polygons_union = gdf_sorted.geometry.union_all()
-        outer_border = polygons_union.boundary
-        outer_polygons = remaining[remaining.geometry.touches(outer_border)].copy()
-        gdf_sorted = pd.concat([gdf_sorted, outer_polygons], ignore_index=True)
-        remaining = remaining.drop(index=outer_polygons.index)
-
-    return gdf_sorted
 
 
 def pieces_to_final_data(
@@ -299,8 +263,10 @@ def pieces_to_final_data(
     def calculate_border_weight(id1: int, id2: int) -> float:
         poly1 = gdf.geometry.loc[id1]
         poly2 = gdf.geometry.loc[id2]
-        border = poly1.intersection(poly2)
-        border = gpd.GeoDataFrame(geometry=list(border.geoms), crs=metrical_crs)
+        border = shared_border(poly1, poly2)  # returns a LineString or MultiLineString
+
+        geom = list(border.geoms) if isinstance(border, MultiLineString) else [border]
+        border = gpd.GeoDataFrame(geometry=geom, crs=metrical_crs)
         return calculate_weight_by_buffer(border, streets, weights)
     gdf["weights"] = gdf.apply(
         lambda row: {neigh: calculate_border_weight(row.name, neigh) for neigh in row["neighbors"]},

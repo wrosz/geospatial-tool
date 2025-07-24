@@ -28,4 +28,7 @@ dist/
 # actual database configuration
 db_config.json
 
+# not working
+better_cuts_beta.py
+
 
