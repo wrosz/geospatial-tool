@@ -144,6 +144,29 @@ def addresses_inside_polygon(
     return possible_matches[possible_matches.within(polygon)]
 
 
+def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def compute_angle(point, origin):
+        dx = point.x - origin.x
+        dy = point.y - origin.y
+        angle = np.arctan2(dy, dx)
+        return angle
+    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
+    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
+    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
+    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
+    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
+    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
+    gdf_sorted = gdf_sorted.to_crs(gdf.crs)
+
+    polygons_union = gdf_sorted.geometry.union_all()
+    if not isinstance(polygons_union, Polygon):
+        return gdf_sorted, gpd.GeoDataFrame(geometry=[], crs=gdf_sorted.crs)
+    outer_border = polygons_union.exterior
+    outer_polygons = gdf_sorted[gdf_sorted.geometry.touches(outer_border)].copy()
+    remaining = gdf_sorted.drop(index=outer_polygons.index)
+    return outer_polygons, remaining
+
+
 
 def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
@@ -155,33 +178,21 @@ def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     Returns:
         gpd.GeoDataFrame: Sorted GeoDataFrame.
     """
-    def compute_angle(point, origin):
-        dx = point.x - origin.x
-        dy = point.y - origin.y
-        angle = np.arctan2(dy, dx)
-        return angle
-
-    gdf_sorted = gdf.copy()
-    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
-    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
-    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
-    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
-    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
-
-    polygons_union = gdf_sorted.geometry.union_all()
-    if not isinstance(polygons_union, Polygon):
-        return gdf_sorted
-    outer_border = polygons_union.exterior
-    outer_polygons = gdf_sorted[gdf_sorted.geometry.touches(outer_border)].copy()
-    remaining = gdf_sorted.drop(index=outer_polygons.index)
-    gdf_sorted = outer_polygons
+    outer_polygons, remaining = sort_outer_polygons_spatially(gdf)
+    gdf_sorted = outer_polygons.copy()
     while len(remaining) > 0:
+        prev_len = len(remaining)
         polygons_union = gdf_sorted.geometry.union_all()
         outer_border = polygons_union.boundary
         outer_polygons = remaining[remaining.geometry.touches(outer_border)].copy()
         gdf_sorted = pd.concat([gdf_sorted, outer_polygons], ignore_index=True)
         remaining = remaining.drop(index=outer_polygons.index)
+        gdf_sorted = gdf_sorted.reset_index(drop=True)
 
+        if len(remaining) == prev_len:
+            warnings.warn("No more outer polygons found, stopping sorting.")
+            gdf_sorted = pd.concat([gdf_sorted, remaining], ignore_index=True)
+            break
     return gdf_sorted
 
 

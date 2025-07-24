@@ -30,6 +30,6 @@ def run_partition(args):
     )
 
     # Save result to database
-    db_io.save_partition_result(engine, result, config["data_for_partition"]["output"], args.output_table)
+    db_io.save_result(engine, result, config["data_for_partition"]["output"], args.output_table)
 
     

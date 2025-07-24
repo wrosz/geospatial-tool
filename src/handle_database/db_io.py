@@ -232,7 +232,7 @@ def load_all_data_with_bbox(engine, config, args):
     return {"area": area, "addresses": addresses, "osm_data": osm_data}
 
 
-def save_partition_result(
+def save_result(
         engine: "sqlalchemy.engine.Engine",
         gdf: "gpd.GeoDataFrame",
         output_cfg: dict,
@@ -254,4 +254,4 @@ def save_partition_result(
     output_table = output_table or output_cfg["table"]
     gdf = gdf.to_crs(output_cfg["crs"])
     gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
-    print(f"\nSaved partition result to table {output_cfg["table"]}.")
+    print(f"\nSaved result to table {output_cfg["table"]}.")

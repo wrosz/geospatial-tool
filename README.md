@@ -2,28 +2,33 @@
 
 This project is a Python-based geospatial data processing toolkit. It leverages GeoPandas and NumPy to analyze, filter, and process spatial data, particularly for urban infrastructure such as streets, addresses, and boundaries.
 
+---
+
 ## Project Structure
 ```bash
-project-root/
-│
-├── .gitignore                  # Git ignore rules
-├── default_weights.csv         # Default weights config (CSV)
-├── main.py                     # Entry point of the program
-├── README.md                   # Project documentation
-├── requirements.txt            # Python dependencies
-├── sample_db_config.json       # Sample DB config for setup
-│
-├── src/                        # Source code
-│   ├── logic_config.py         # Global config or settings
-│   ├── utils.py                # Utility functions
-│   │
-│   ├── handle_database/        # Database I/O handling
-│   │   └── db_io.py
-│   │
-│   └── partition/              # Partitioning and spatial logic
-│       ├── cuts.py
-│       └── intersections.py
+.
+├── .gitignore
+├── sample_db_config.json      # Example config in required format
+├── main.py                    # Entry point
+├── README.md
+├── requirements.txt
+└── src/                       # Main source code
+    ├── logic_config.py        # Configuration for global variables
+    ├── utils.py               # Utility functions
+    ├── handle_database/       # Database I/O logic
+    │   ├── db_io.py
+    │   └── default_weights.csv
+    ├── merge/                 # Merging logic and execution
+    │   ├── merge_logic.py
+    │   └── run_merge.py
+    ├── partition/             # Partitioning logic and execution
+    │   ├── better_cuts_beta.py
+    │   ├── cuts_logic.py
+    │   ├── intersections_logic.py
+    │   └── run_partition.py
+
 ```
+---
 
 ## Installation
 
@@ -177,14 +182,52 @@ This means the local OSRM server is ready and listening on `http://localhost:500
 
 ## Running the Program
 
-Once the database and OSRM server are set up, you can run the main script. Example:
+
+Once the database and OSRM server are set up, you can run the main script for either partitioning (cutting) or merging areas.
+
+### Partitioning (Cutting) Areas
+
+The tool supports partitioning (cutting) areas into smaller polygons based on address distribution and OSM street network. This is useful for dividing large service areas into balanced, address-based regions.
+
+**Requirements:**
+- The database must contain polygon areas, address points, and OSM street geometries (see database section above).
+- The config file must specify the relevant tables and columns under `data_for_partition`.
+- A weights CSV file must be provided (or specified in the config) to control the cost of traversing different street types.
+
+**Example usage:**
 
 ```bash
-python main.py --area_id <AREA_ID> --min_addresses <MIN_ADDR> --weights_path <WEIGHTS_CSV>
+python main.py cut --area_id <AREA_ID> --min_addresses <MIN_ADDR> --weights_path <WEIGHTS_CSV>
 ```
 
-Replace `<AREA_ID>`, `<MIN_ADDR>`, and `<WEIGHTS_CSV>` with your values. See the `main.py` docstring and argument help for details.
+- `<AREA_ID>`: ID prefix of the areas to cut
+- `<MIN_ADDR>`: Minimum number of addresses per resulting piece
+- `<WEIGHTS_CSV>`: Path to the weights CSV file (optional if set in config)
 
+The partitioned (cut) results will be saved to the output table specified in your config file under the `data_for_partition` section.
 
+See the `main.py` docstring and argument help for more details on available options.
 
+---
 
+### Merging Areas
+
+The tool also supports merging areas based on address density and shortest route calculations. This is useful for aggregating small polygons into larger ones, e.g., for service area optimization.
+
+**Requirements:**
+- The database must contain address points with a time period column (see config example).
+- The config file must specify the relevant tables and columns under `data_for_merge`.
+
+**Example usage:**
+
+```bash
+python main.py merge --area_id <AREA_ID> --min_addresses <MIN_ADDR> --max_addresses <MAX_ADDR>
+```
+
+- `<AREA_ID>`: ID prefix of the areas to merge
+- `<MIN_ADDR>`: Minimum number of addresses (daily average) required in a merged polygon
+- `<MAX_ADDR>`: Maximum number of addresses (daily average) allowed in a merged polygon
+
+The merged results will be saved to the output table specified in your config file under the `data_for_merge` section.
+
+See the `main.py` docstring and argument help for more details on available options.

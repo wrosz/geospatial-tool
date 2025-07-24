@@ -18,6 +18,7 @@ def run_merge(args):
     data = db_io.load_all_data_with_bbox(engine, config["data_for_merge"], args)
     area, addresses = data["area"], data["addresses"]
 
+    print("\nMerging polygons based on shortest route...")
     result = merge_polygons_by_shortest_route(
         gdf=area,
         addresses=addresses,
@@ -27,4 +28,4 @@ def run_merge(args):
     )
 
     # Save result to database
-    db_io.save_partition_result(engine, result, config["data_for_merge"]["output"], args.output_table)
+    db_io.save_result(engine, result, config["data_for_merge"]["output"], args.output_table)

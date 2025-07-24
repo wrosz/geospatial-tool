@@ -1,16 +1,19 @@
 import argparse
 import sys
 import os
+import warnings
 
 from src.partition.run_partition import run_partition
 from src.merge.run_merge import run_merge
 
 
-
 def main():
+
     if len(sys.argv) == 1:
-        sys.argv.extend(["cut",
-            "--area_id" ,"146201_1.0009", "--min_addresses","50"
+        # import warnings
+        # warnings.simplefilter("error")
+        sys.argv.extend(["merge",
+            "--area_id" ,"14140", "--min_addresses","20", "--max_addresses","100",
         ])
 
 

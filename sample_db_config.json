@@ -2,29 +2,60 @@
   "connection": {
     "host": "localhost",
     "port": 5432,
+    "name": "your_database_name",
     "user": "your_username",
-    "password": "your_password",
-    "database": "spatialdb"
+    "password": "your_password"
   },
-  "addresses": {
-    "addresses_table": "table_with_addresses_name",
-    "addresses_geom_column": "geom",
-    "teryt_column": "teryt",
-    "crs": "EPSG:4326"
+
+  "weights": {
+      "default_weights_path": "path/to/default_weights.csv"
   },
-  "areas": {
-    "area_table": "table_with_areas_name",
-    "area_id_column": "id",
-    "area_geom_column": "geom",
-    "crs": "EPSG:4326"
-},
-  "osm_data": {
-    "table": "table_with_osm_data",
-    "geom_column": "way",
-    "crs": "EPSG:4326"
+
+  "data_for_partition": {
+    "addresses": {
+      "addresses_table": "your_addresses_table",
+      "addresses_geom_column": "your_geom_column",
+      "teryt_column": "teryt",
+      "crs": "EPSG:XXXX"
+    },
+    "areas": {
+      "area_table": "your_areas_table",
+      "area_id_column": "your_area_id_column",
+      "area_geom_column": "your_area_geom_column",
+      "crs": "EPSG:XXXX"
+    },
+    "osm_data": {
+      "table": "your_osm_streets_table",
+      "geom_column": "your_osm_geom_column",
+      "crs": "EPSG:XXXX"
+    },
+    "output": {
+      "table": "your_output_table",
+      "crs": "EPSG:XXXX"
+    }
   },
-  "output": {
-    "table": "cut_results_123",
-    "crs": "EPSG:4326"
+
+  "data_for_merge": {
+    "addresses": {
+      "addresses_table": "your_merge_addresses_table",
+      "addresses_geom_column": "your_merge_geom_column",
+      "teryt_column": null,
+      "crs": "EPSG:XXXX",
+      "time_period": {
+        "column_name": "your_time_column",
+        "start": "YYYY-MM-DD",
+        "end": "YYYY-MM-DD"
+      }
+    },
+    "areas": {
+      "area_table": "your_merge_areas_table",
+      "area_id_column": "your_merge_area_id_column",
+      "area_geom_column": "your_merge_area_geom_column",
+      "crs": "EPSG:XXXX"
+    },
+    "output": {
+      "table": "your_merge_output_table",
+      "crs": "EPSG:XXXX"
+    }
   }
 }
