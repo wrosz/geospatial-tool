@@ -189,9 +189,12 @@ def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         remaining = remaining.drop(index=outer_polygons.index)
         gdf_sorted = gdf_sorted.reset_index(drop=True)
 
-        if len(remaining) == prev_len:
-            warnings.warn("No more outer polygons found, stopping sorting.")
+        if len(remaining) == prev_len and len(remaining) > 0:
+            warnings.warn(f"No more outer polygons found, stopping sorting.\nNumber of remaining polygons: {len(remaining)}")
             gdf_sorted = pd.concat([gdf_sorted, remaining], ignore_index=True)
+            break
+        elif len(remaining) == 0:
+            print("All polygons sorted successfully.")
             break
     return gdf_sorted
 

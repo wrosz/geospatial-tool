@@ -1,6 +1,7 @@
 import warnings
 import geopandas as gpd
 import pandas as pd
+import sys
 
 from src.utils import shared_border, addresses_inside_polygon, get_osrm_route, sort_polygons_spatially, sort_outer_polygons_spatially
 from src.logic_config import metrical_crs
@@ -93,10 +94,17 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
 
     gdf_new = sort_polygons_spatially(gdf_new)
     gdf_new.reset_index(drop=True, inplace=True)
-    
-    while True:
-        print(f'Number of polygons not following minimum address requirement: {gdf_new.must_be_merged.sum()}', end='\r', flush=True)
 
+    prev_num_len = len(str(gdf_new.must_be_merged.sum()))
+    prefix = "Number of polygons not following minimum address requirement: "
+
+    while True:
+        # refresh the current count of polygons that must be merged on console
+        count_str = str(gdf_new.must_be_merged.sum())
+        padding = max(prev_num_len - len(count_str), 0)
+        sys.stdout.write('\r' + prefix + count_str + (' ' * padding))
+        sys.stdout.flush()
+        prev_num_len = len(count_str)
 
         if gdf_new.can_be_merged.sum() == 0 or gdf_new.must_be_merged.sum() == 0:
             # If no polygons can be merged or must be merged, exit the loop
