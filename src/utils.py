@@ -3,7 +3,7 @@ import requests
 import polyline
 import warnings
 import pandas as pd
-from shapely.geometry import Polygon, LineString, MultiLineString
+from shapely.geometry import Polygon, LineString, MultiLineString, Point
 from shapely.ops import linemerge
 import numpy as np
 from shapely.geometry import MultiPoint
@@ -217,20 +217,34 @@ def shared_border(poly1, poly2):
 
 
 def extend_linestring(line, distance: float) -> LineString:
-        if not isinstance(line, LineString) or len(line.coords) < 2:
-            return line  # Return unchanged for non-LineStrings or degenerate lines
+    if not isinstance(line, LineString) or len(line.coords) < 2:
+        return line  # Return unchanged for non-LineStrings or degenerate lines
 
-        coords = np.array(line.coords)
+    # Use interpolation to get direction at start and end
+    # Interpolate a small fraction along the line to get a second point
+    frac = 1  # Small fraction for interpolation
 
-        # Extend start
-        v_start = coords[0] - coords[1]
-        v_start /= np.linalg.norm(v_start)
-        new_start = coords[0] + distance * v_start
+    # Start direction
+    start_pt = line.interpolate(0)
+    next_pt = line.interpolate(frac)
+    v_start = np.array(next_pt.coords[0]) - np.array(start_pt.coords[0])
+    norm_start = np.linalg.norm(v_start)
+    if norm_start == 0:
+        return line  # Degenerate at start
+    v_start /= norm_start
+    new_start = np.array(start_pt.coords[0]) - distance * v_start
 
-        # Extend end
-        v_end = coords[-1] - coords[-2]
-        v_end /= np.linalg.norm(v_end)
-        new_end = coords[-1] + distance * v_end
+    # End direction
+    end_pt = line.interpolate(line.length)
+    prev_pt = line.interpolate(line.length - frac)
+    v_end = np.array(end_pt.coords[0]) - np.array(prev_pt.coords[0])
+    norm_end = np.linalg.norm(v_end)
+    if norm_end == 0:
+        return line  # Degenerate at end
+    v_end /= norm_end
+    new_end = np.array(end_pt.coords[0]) + distance * v_end
 
-        new_coords = [tuple(new_start)] + [tuple(pt) for pt in coords[1:-1]] + [tuple(new_end)]
-        return LineString(new_coords)
+    # Build new coordinates
+    coords = list(line.coords)
+    new_coords = [tuple(new_start)] + coords[1:-1] + [tuple(new_end)]
+    return LineString(new_coords)

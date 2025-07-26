@@ -1,21 +1,10 @@
 import argparse
-import sys
-import os
-import warnings
 
 from src.partition.run_partition import run_partition
 from src.merge.run_merge import run_merge
 
 
 def main():
-
-    if len(sys.argv) == 1:
-        # import warnings
-        # warnings.simplefilter("error")
-        sys.argv.extend(["merge",
-            "--area_id" ,"14140", "--min_addresses","20", "--max_addresses","100",
-        ])
-
 
     # Common parser for shared arguments
     common_parser = argparse.ArgumentParser(add_help=False)

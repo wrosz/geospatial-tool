@@ -47,7 +47,8 @@ def load_area(
 
     area_geom_column_name = areas_cfg["area_geom_column"]
     gdf = gpd.read_postgis(query, engine, geom_col=area_geom_column_name, params=params)
-    gdf = gdf.rename_geometry("geometry")
+    if area_geom_column_name != "geometry":
+        gdf = gdf.rename_geometry("geometry")
     print(f"Loaded {len(gdf)} areas with ID prefix {area_id} from table {areas_table_name}.")
 
     if gdf.empty:
@@ -112,7 +113,10 @@ def load_addresses(
 
     query = text(f"SELECT * FROM {addresses_table_name}{where_sql}")
     gdf = gpd.read_postgis(query, engine, geom_col=addresses_geom_column_name, params=params)
-    gdf = gdf.rename_geometry("geometry")
+    
+    if addresses_geom_column_name != "geometry":
+        gdf = gdf.rename_geometry("geometry")
+
     print(
         f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
         f"{'\nteryt_id = ' + str(teryt_id) if teryt_id is not None else ''}"
@@ -188,7 +192,10 @@ def load_osm_data(
         raise ValueError(f"\nNo OSM data found in table {osm_data_cfg['table']}.")
     print(f"Loaded OSM data ({len(gdf)} rows) from table {osm_data_cfg['table']}."
           f"{'\nbbox=' + str(bbox) if bbox is not None else ''}")
-    gdf = gdf.rename_geometry("geometry")
+    
+    if geom_col != "geometry":
+        gdf = gdf.rename_geometry("geometry")
+    
     return gdf
 
 

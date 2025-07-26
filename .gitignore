@@ -25,10 +25,6 @@ build/
 dist/
 *.egg-info/
 
-# actual database configuration
+# hidden files
 db_config.json
-
-# not working
-better_cuts_beta.py
-
-
+dev/
