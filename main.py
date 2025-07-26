@@ -18,7 +18,8 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True, help="Action to perform: cut or merge")
 
     cut_parser = subparsers.add_parser("cut", help="Cut geometries into smaller pieces", parents=[common_parser])
-    cut_parser.add_argument("--area_id", type=str, required=True, help="ID prefixes of the areas to cut")
+    cut_parser.add_argument("--area_id", type=str, nargs="+", required=True,
+                            help="List of ID prefixes of the areas to cut (e.g. --area_id A1 B2 C3)")
     cut_parser.add_argument("--min_addresses", type=float, required=True, help="Minimum number of addresses per piece")
     cut_parser.add_argument("--weights_path", type=str, default=None, help="Path to the weights CSV file (default: specified config)")
     cut_parser.set_defaults(func=run_partition)
@@ -26,7 +27,8 @@ def main():
     merge_parser = subparsers.add_parser("merge", help="Merge geometries based on shortest route", parents=[common_parser])
     merge_parser.add_argument("--min_addresses", type=float, required=True, help="Minimum number of addresses (daily average from time period specified in config) required for merging")
     merge_parser.add_argument("--max_addresses", type=float, required=True, help="Maximum number of addresses (daily average from time period specified in config) allowed in a merged polygon")
-    merge_parser.add_argument("--area_id", type=str, required=True, help="ID prefixes of the areas to merge")
+    merge_parser.add_argument("--area_id", type=str, nargs="+", required=True,
+                          help="List of ID prefixes of the areas to merge (e.g. --area_id A1 B2 C3)")
     merge_parser.set_defaults(func=run_merge)
     
     args = parser.parse_args()

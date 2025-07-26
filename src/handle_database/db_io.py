@@ -24,7 +24,7 @@ def connect(connection_config: dict) -> sqlalchemy.engine.Engine:
 def load_area(
         engine: "sqlalchemy.engine.base.Engine",
         areas_cfg: dict,
-        area_id: str
+        area_id: str | list[str]
     ) -> gpd.GeoDataFrame:
     """
     Loads area geometries from a database table based on a given area ID prefix.
@@ -40,10 +40,27 @@ def load_area(
     Raises:
         ValueError: If no areas are found with the specified area ID prefix.
     """
+    from sqlalchemy import text
+
     areas_table_name = areas_cfg["area_table"]
     id_column_name = areas_cfg["area_id_column"]
-    query = text(f"SELECT * FROM {areas_table_name} WHERE {id_column_name}::text LIKE :area_id")
-    params = {"area_id": f"{area_id}%"}
+
+    if isinstance(area_id, list):
+        like_clauses = []
+        params = {}
+
+        for i, prefix in enumerate(area_id):
+            param_name = f"prefix_{i}"
+            like_clauses.append(f"{id_column_name}::text LIKE :{param_name}")
+            params[param_name] = f"{prefix}%"
+
+        where_clause = " OR ".join(like_clauses)
+        query = text(f"SELECT * FROM {areas_table_name} WHERE {where_clause}")
+
+    else:
+        query = text(f"SELECT * FROM {areas_table_name} WHERE {id_column_name}::text LIKE :area_id")
+        params = {"area_id": f"{area_id}%"}
+
 
     area_geom_column_name = areas_cfg["area_geom_column"]
     gdf = gpd.read_postgis(query, engine, geom_col=area_geom_column_name, params=params)

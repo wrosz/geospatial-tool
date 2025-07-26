@@ -1,7 +1,6 @@
 import warnings
 import geopandas as gpd
 import pandas as pd
-import time
 
 from src.utils import shared_border, addresses_inside_polygon, get_osrm_route, sort_polygons_spatially, sort_outer_polygons_spatially
 from src.logic_config import metrical_crs
@@ -89,6 +88,8 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
     if sum(gdf_new["n_addresses"]) < min_addresses:
         warnings.warn("Total number of addresses is less than min_addresses, returning sum of all geometries.")
         return gdf_new.dissolve(by="can_be_merged", as_index=False, aggfunc="first").reset_index(drop=True)
+    if any(gdf_new["n_addresses"] > max_addresses):
+        print(f"Warning: Polygons with ids {sum(gdf_new[gdf_new['n_addresses'] > max_addresses].merged_ids.tolist(), [])} already have more than maximum of {max_addresses} addresses on average.")
 
     gdf_new = sort_polygons_spatially(gdf_new)
     gdf_new.reset_index(drop=True, inplace=True)
