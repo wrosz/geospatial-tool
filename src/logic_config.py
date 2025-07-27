@@ -1,6 +1,5 @@
 # crs settings
 metrical_crs = "EPSG:2180"  # used for finding buffers and geometry lengths
-final_crs = "EPSG:4326"  # final output CRS
 
 # additional parameters for finding line intersections
 min_angle = 20  # minimum angle in degrees to consider an intersection valid

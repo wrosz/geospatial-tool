@@ -4,7 +4,7 @@ import warnings
 from shapely.geometry import Polygon, MultiLineString
 from shapely.ops import linemerge, split
 
-from src.logic_config import metrical_crs, final_crs, streets_extension_distance, default_top_weights_percentage, buff
+from src.logic_config import metrical_crs, streets_extension_distance, default_top_weights_percentage, buff
 from src.partition.intersections_logic import find_valid_intersections
 from src.utils import (calculate_weight_by_buffer, addresses_inside_polygon, get_osrm_route,
                        shared_border, sort_polygons_spatially, extend_linestring)
@@ -346,8 +346,7 @@ def pieces_to_final_data(
         axis=1,
     )
 
-    # return the final GeoDataFrame with expected crs
-    return gdf.to_crs(final_crs)
+    return gdf
 
 
 # | Final function to partition multiple polygons

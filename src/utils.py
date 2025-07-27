@@ -8,7 +8,7 @@ from shapely.ops import linemerge
 import numpy as np
 from shapely.geometry import MultiPoint
 
-import src.logic_config as logic_config
+import src.logic_config as logic_config 
 
 
 def get_osrm_route(
@@ -144,20 +144,68 @@ def addresses_inside_polygon(
     return possible_matches[possible_matches.within(polygon)]
 
 
-def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    def compute_angle(point, origin):
-        dx = point.x - origin.x
-        dy = point.y - origin.y
-        angle = np.arctan2(dy, dx)
-        return angle
-    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
-    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
-    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
-    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
-    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
-    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
-    gdf_sorted = gdf_sorted.to_crs(gdf.crs)
 
+def sort_by_distance_from_point(
+    gdf: gpd.GeoDataFrame, point: Point
+) -> gpd.GeoDataFrame:
+    """
+    Sorts a GeoDataFrame of polygons by their distance to a given point.
+
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        point (Point): The point to measure distance from.
+
+    Returns:
+        gpd.GeoDataFrame: Sorted GeoDataFrame.
+    """
+    gdf = gdf.copy()
+    gdf["distance"] = gdf.geometry.distance(point)
+    gdf = gdf.sort_values("distance", ascending=False)
+    gdf.drop(columns=["distance"], inplace=True)
+    return gdf
+
+
+def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame, how:str, pts = None) -> gpd.GeoDataFrame:
+    '''Sorts outer polygons spatially based on a given method and points.
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        how (str): Method to sort polygons. Options are 'angle' or 'distance'.
+        pts (gpd.GeoDataFrame, optional): Points to consider for sorting, if how == 'distance' (distance is measured from centroid of these points).
+            If None, uses the union of polygons.
+
+        Returns:
+            gpd.GeoDataFrame: Sorted GeoDataFrame.
+    '''
+
+    if how not in ['angle', 'distance']:
+        raise ValueError("Parameter 'how' must be either 'angle' or 'distance'.")
+    
+    pts_inside = addresses_inside_polygon(gdf.union_all(), pts).copy() if not pts.empty else None
+    if pts_inside is not None and pts_inside.empty:
+        warnings.warn("No points inside the polygons, sorting by polygon centroid distance.")
+        pts_inside = None
+    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
+    
+    if how == 'distance':
+        # Sort polygons by distance from the centroid
+        pts_metr = pts_inside.to_crs(logic_config.metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
+        pts_centroid = MultiPoint(pts_metr.geometry.tolist()).centroid if isinstance(pts_metr, gpd.GeoDataFrame) else pts_metr
+        gdf_sorted = sort_by_distance_from_point(gdf_sorted, pts_centroid)
+        gdf_sorted = gdf_sorted.to_crs(gdf.crs)
+        
+    elif how == 'angle':
+        def compute_angle(point, origin):
+            dx = point.x - origin.x
+            dy = point.y - origin.y
+            angle = np.arctan2(dy, dx)
+            return angle
+        gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
+        origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
+        gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
+        gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
+        gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
+    
+    gdf_sorted = gdf_sorted.to_crs(gdf.crs)
     polygons_union = gdf_sorted.geometry.union_all()
     if not isinstance(polygons_union, Polygon):
         return gdf_sorted, gpd.GeoDataFrame(geometry=[], crs=gdf_sorted.crs)
@@ -168,17 +216,19 @@ def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 
-def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def sort_polygons_spatially(gdf: gpd.GeoDataFrame, how = 'angle', pts = None) -> gpd.GeoDataFrame:
     """
     Sorts polygons spatially from outermost to innermost, each layer clockwise.
 
     Args:
         gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        how (str): Method to sort polygons. Options are 'angle' or 'distance'.
+        pts (gpd.GeoDataFrame, optional): Points to consider for sorting, if how == 'distance'.
 
     Returns:
         gpd.GeoDataFrame: Sorted GeoDataFrame.
     """
-    outer_polygons, remaining = sort_outer_polygons_spatially(gdf)
+    outer_polygons, remaining = sort_outer_polygons_spatially(gdf, how, pts)
     gdf_sorted = outer_polygons.copy()
     while len(remaining) > 0:
         prev_len = len(remaining)

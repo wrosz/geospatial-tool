@@ -3,7 +3,7 @@ import geopandas as gpd
 import pandas as pd
 import sys
 
-from src.utils import shared_border, addresses_inside_polygon, get_osrm_route, sort_polygons_spatially, sort_outer_polygons_spatially
+from src.utils import shared_border, addresses_inside_polygon, get_osrm_route, sort_polygons_spatially
 from src.logic_config import metrical_crs
 
 
@@ -81,7 +81,7 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         else:
             return calculate_points_centroid(gpd.GeoDataFrame(geometry=[poly], crs=gdf_new.crs))
 
-
+    # Initialize new GeoDataFrame with necessary columns
     gdf_new.reset_index(drop=True, inplace=True)
     gdf_new = gdf_new.drop(columns=id_col).copy()
     gdf_new["n_addresses"] = gdf_new.geometry.apply(lambda x: len(addresses_inside_polygon(x, addresses)))
@@ -95,12 +95,15 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
     if any(gdf_new["n_addresses"] > max_addresses):
         print(f"Warning: Polygons with ids {sum(gdf_new[gdf_new['n_addresses'] > max_addresses].merged_ids.tolist(), [])} already have more than maximum of {max_addresses} addresses.")
 
-    gdf_new = sort_polygons_spatially(gdf_new)
+    # Sort polygons spatially to optimize merging (from outer-most to inner-most)
+    gdf_new = sort_polygons_spatially(gdf_new, how='distance', pts=addresses)
     gdf_new.reset_index(drop=True, inplace=True)
 
+    # Initialize previous number of polygons to track changes
     prev_num_len = len(str(gdf_new.must_be_merged.sum()))
     prefix = "Number of polygons not following minimum address requirement: "
 
+    # Loop until no polygons can be merged or must be merged
     while True:
         # refresh the current count of polygons that must be merged on console
         count_str = str(gdf_new.must_be_merged.sum())
@@ -109,11 +112,12 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         sys.stdout.flush()
         prev_num_len = len(count_str)
 
-        if gdf_new.can_be_merged.sum() == 0 or gdf_new.must_be_merged.sum() == 0:
+        if (gdf_new.must_be_merged & gdf_new.can_be_merged).sum() == 0:
             # If no polygons can be merged or must be merged, exit the loop
+            print()
             break
 
-        row_to_merge = gdf_new[gdf_new.must_be_merged].iloc[0]
+        row_to_merge = gdf_new[gdf_new.must_be_merged & gdf_new.can_be_merged].iloc[0]
         neighbors = gdf_new[gdf_new.geometry.apply(lambda x:shared_border(x, row_to_merge.geometry) is not None)].drop(row_to_merge.name).copy()
         neighbors_to_merge = neighbors[neighbors["n_addresses"] + row_to_merge.n_addresses <= max_addresses].copy()
 
@@ -144,18 +148,30 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         gdf_new = gdf_new.drop([row_to_merge.name, best_neighbor.name]).copy()
         gdf_new = pd.concat([new_row, gdf_new], ignore_index=True)
 
+
+    # Handle remaining polygons that must be merged but cannot due to maximum address limit
     remaining_to_merge = gdf_new[gdf_new.must_be_merged].copy()
     if not remaining_to_merge.empty:
         warnings.warn(f"Some polygons have less than {min_addresses/n_days} addresses, merging them without maximum address limit")
+
         for index, row in remaining_to_merge.iterrows():
             neighbors = gdf_new[gdf_new.geometry.apply(lambda x: shared_border(x, row.geometry) is not None)].copy()
             if row.name in neighbors.index:
-                neighbors = neighbors.drop(index=row.name)
+                neighbors = neighbors.drop(index=row.name)  # avoid self-merge
             if neighbors.empty:
                 continue
+
+            # avoid multipolygon merging
+            neighbors_to_merge = neighbors_to_merge[neighbors_to_merge.geometry.apply(lambda x: x.union(row_to_merge.geometry).geom_type == 'Polygon')].copy()
+            if neighbors_to_merge.empty:
+                continue
             
-            best_neighbor = neighbors.loc[neighbors.addresses_centroid.apply(
-                lambda pt: get_osrm_route(row.addresses_centroid.x, row.addresses_centroid.y, pt.x, pt.y).duration).idxmin()].copy()
+            # Find the neighbor with the shortest route to polygon_to_merge (based on centroid)
+            neighbors_to_merge["route_duration"] = neighbors_to_merge.addresses_centroid.apply(
+                lambda pt: get_osrm_route(row.addresses_centroid.x, row.addresses_centroid.y, pt.x, pt.y).duration
+            )
+
+            best_neighbor = neighbors_to_merge.loc[neighbors_to_merge["route_duration"].idxmin()]
             row_merged_geom = gdf_new.loc[[row.name, best_neighbor.name]].union_all()
             new_row = gpd.GeoDataFrame(
                 {
@@ -163,17 +179,23 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
                     "merged_ids": [row.merged_ids + best_neighbor.merged_ids],
                     "n_addresses": [row.n_addresses + best_neighbor.n_addresses],
                     "addresses_centroid": [addresses_centroid(row_merged_geom)],
-                    "can_be_merged": [False]  # Set to False since we are merging without address limit
+                    "can_be_merged": [row.n_addresses + best_neighbor.n_addresses < max_addresses],
+                    "must_be_merged": [row.n_addresses + best_neighbor.n_addresses < min_addresses]
                 },
                 crs=gdf_new.crs
             )
-            gdf_new = gdf_new.drop([row.name, best_neighbor.name])
-            gdf_new = pd.concat([new_row, gdf_new])
+            gdf_new = gdf_new.drop([row.name, best_neighbor.name]).copy()
+            gdf_new = pd.concat([new_row, gdf_new], ignore_index=True)
+            
+            
     gdf_new.drop(columns=["addresses_centroid", "can_be_merged", "must_be_merged"], inplace=True)
 
     if n_days is not None:
         gdf_new["avg_addresses"] = gdf_new["n_addresses"] / n_days
         gdf_new.drop(columns=["n_addresses"], inplace=True)
+
+    print("Merging completed successfully.")
+    print(f"Number of merged polygons: {len(gdf_new)}")
     
     return gdf_new
 
@@ -307,13 +329,15 @@ def merge_polygons_by_shortest_route2(gdf, addresses, min_addresses, max_address
                 "merged_ids": [row_to_merge.merged_ids + best_neighbor.merged_ids],
                 "n_addresses": [row_to_merge.n_addresses + best_neighbor.n_addresses],
                 "addresses_centroid": [addresses_centroid(row_merged_geom)],
-                "can_be_merged": [row_to_merge.n_addresses + best_neighbor.n_addresses < max_addresses]
+                "can_be_merged": [row_to_merge.n_addresses + best_neighbor.n_addresses < max_addresses],
+                "must_be_merged": [row_to_merge.n_addresses + best_neighbor.n_addresses < min_addresses]
             },
             crs=gdf_new.crs
         )
         gdf_new = gdf_new.drop([row_to_merge.name, best_neighbor.name]).copy()
         gdf_new = pd.concat([new_row, gdf_new], ignore_index=True)
 
+    # Handle remaining polygons that must be merged but cannot due to maximum address limit
     remaining_to_merge = gdf_new[gdf_new.n_addresses < min_addresses].copy()
     warnings.warn(f"Some polygons have less than {min_addresses} addresses, merging them without maximum address limit")
     for index, row in remaining_to_merge.iterrows():
@@ -323,20 +347,27 @@ def merge_polygons_by_shortest_route2(gdf, addresses, min_addresses, max_address
         if neighbors.empty:
             continue
         
-        best_neighbor = neighbors.loc[neighbors["n_addresses"].idxmin()].copy()
-        row_merged_geom = gdf_new.loc[[row.name, best_neighbor.name]].union_all()
+        # Find the neighbor with the shortest route to polygon_to_merge (based on centroid)
+        neighbors_to_merge["route_duration"] = neighbors_to_merge.addresses_centroid.apply(
+            lambda pt: get_osrm_route(row_to_merge.addresses_centroid.x, row_to_merge.addresses_centroid.y, pt.x, pt.y).duration
+        )
+
+        best_neighbor = neighbors_to_merge.loc[neighbors_to_merge["route_duration"].idxmin()]
+        row_merged_geom = gdf_new.loc[[row_to_merge.name, best_neighbor.name]].union_all()
         new_row = gpd.GeoDataFrame(
             {
                 "geometry": [row_merged_geom],
                 "merged_ids": [row.merged_ids + best_neighbor.merged_ids],
                 "n_addresses": [row.n_addresses + best_neighbor.n_addresses],
                 "addresses_centroid": [addresses_centroid(row_merged_geom)],
-                "can_be_merged": [False]  # Set to False since we are merging without address limit
+                "can_be_merged": [False],  # Set to False since we are merging without address limit
+                "must_be_merged": [False]  # Set to False since we are merging without address limit
+
             },
             crs=gdf_new.crs
         )
-        gdf_new = gdf_new.drop([row.name, best_neighbor.name])
-        gdf_new = pd.concat([new_row, gdf_new])
+        gdf_new = gdf_new.drop([row.name, best_neighbor.name]).copy()
+        gdf_new = pd.concat([new_row, gdf_new], ignore_index=True)
     gdf_new.drop(columns=["addresses_centroid", "can_be_merged"], inplace=True)
     gdf_new["avg_addresses"] = gdf_new["n_addresses"] / n_days
     gdf_new.drop(columns=["n_addresses"], inplace=True)

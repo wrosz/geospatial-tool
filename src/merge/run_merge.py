@@ -3,7 +3,9 @@ import json
 import src.handle_database.db_io as db_io
 from src.merge.merge_logic import merge_polygons_by_shortest_route
 import src.handle_database.db_io as db_io
-from datetime import datetime
+
+import logging
+logging.basicConfig(level=logging.INFO)
 
 def run_merge(args):
     '''Main function to execute the merging process.'''
