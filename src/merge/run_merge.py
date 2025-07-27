@@ -19,15 +19,13 @@ def run_merge(args):
     data = db_io.load_all_data_with_bbox(engine, config["data_for_merge"], args)
     area, addresses = data["area"], data["addresses"]
 
-    # Calculate number of days in the specified time period if all values are not null
-    time_period = config["data_for_merge"]["addresses"].get("time_period")
-    if time_period and all(time_period.get(k) is not None for k in ["start", "end"]):
-        start = datetime.fromisoformat(time_period["start"])
-        end = datetime.fromisoformat(time_period["end"])
-        num_days = (end - start).days
+    if args.avg:
+        # Calculate average daily number of addresses
+        num_days = db_io.get_num_days_from_time_period(config["data_for_merge"]["addresses"])
     else:
-        print("Time period not specified or incomplete, using default num_days = 1")
-        num_days = 1
+        # Use total number of addresses
+        num_days = None
+
 
     print("\nMerging polygons based on shortest route...")
     result = merge_polygons_by_shortest_route(

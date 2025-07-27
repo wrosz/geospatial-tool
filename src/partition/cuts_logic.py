@@ -4,12 +4,13 @@ import warnings
 from shapely.geometry import Polygon, MultiLineString
 from shapely.ops import linemerge, split
 
-from src.logic_config import metrical_crs, streets_extension_distance, default_top_weights_percentage, buff
+from src.logic_config import metrical_crs, final_crs, streets_extension_distance, default_top_weights_percentage, buff
 from src.partition.intersections_logic import find_valid_intersections
 from src.utils import (calculate_weight_by_buffer, addresses_inside_polygon, get_osrm_route,
                        shared_border, sort_polygons_spatially, extend_linestring)
 
 
+from dev.show_shapes import show_shapes
 
 def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
@@ -346,7 +347,7 @@ def pieces_to_final_data(
     )
 
     # return the final GeoDataFrame with expected crs
-    return gdf
+    return gdf.to_crs(final_crs)
 
 
 # | Final function to partition multiple polygons
@@ -359,6 +360,7 @@ def partition_polygons(
     weights: pd.DataFrame,
     id_column: str,
     top_weights_percentage: float = default_top_weights_percentage,
+    n_days: int | None = None
 ) -> gpd.GeoDataFrame:
     """
     Partitions multiple polygons into smaller pieces based on street routes and address distribution.
@@ -371,10 +373,17 @@ def partition_polygons(
         weights (pd.DataFrame): DataFrame with weights for street types.
         id_column (str): Column name for unique identifiers in the polygons GeoDataFrame.
         top_weights_percentage (float): Fraction of top-weighted cuts to consider.
+        n_days (int | None): Number of days for average address calculation, if applicable.
 
     Returns:
         gpd.GeoDataFrame: Final GeoDataFrame with partitioned polygons, neighbors, and border weights.
     """
+    if n_days is not None:
+        if n_days <= 0:
+            raise ValueError("n_days must be greater than 0 to calculate daily averages.")
+        print(f"Using {n_days} days for address calculations to return daily averages.")
+        min_addresses = min_addresses * n_days
+
     dataframes = []
     polygons = polygons.to_crs(metrical_crs)
     addresses = addresses.to_crs(metrical_crs)
@@ -425,4 +434,10 @@ def partition_polygons(
         print(f"Partitioned polygon {initial_id} into {len(gdf)} pieces.")
         dataframes.append(gdf)
     
-    return pd.concat(dataframes, ignore_index=True).reset_index(drop=True)
+    result = pd.concat(dataframes, ignore_index=True).reset_index(drop=True)
+
+    if n_days is not None:
+        result["n_addresses"] = result["n_addresses"] / n_days
+        result.rename(columns={"n_addresses": "avg_addresses"}, inplace=True)
+    
+    return result

@@ -20,13 +20,22 @@ def run_partition(args):
     data = db_io.load_all_data_with_bbox(engine, config["data_for_partition"], args)
     area, addresses, osm_data = data["area"], data["addresses"], data.get("osm_data")
 
+    if args.avg:
+        # Calculate average daily number of addresses
+        num_days = db_io.get_num_days_from_time_period(config["data_for_partition"]["addresses"])
+    else:
+        # Use total number of addresses
+        num_days = None
+
+
     result = partition_polygons(
         polygons=area,
         streets=osm_data,
         addresses=addresses,
         min_addresses=args.min_addresses,
         weights=weights,
-        id_column=config["data_for_partition"]["areas"]["area_id_column"]
+        id_column=config["data_for_partition"]["areas"]["area_id_column"],
+        n_days=num_days
     )
 
     # Save result to database

@@ -27,7 +27,7 @@ def calculate_points_centroid(points):
 
 
 
-def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresses, id_col: str = "id", n_days: int = 1):
+def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresses, id_col: str = "id", n_days: int | None = None):
     """
     Merges polygons in a GeoDataFrame based on the shortest route between them.
     
@@ -37,18 +37,21 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         min_addresses (int): Minimum number of addresses required for merging.
         max_addresses (int): Maximum number of addresses allowed in a merged polygon.
         id_col (str): Column name in gdf_new that contains unique identifiers for polygons.
-        n_days (int): Number of days to consider for merging.
+        n_days (int | None): Number of days for average address calculation, if applicable.
 
     Returns:
         gpd.GeoDataFrame: Merged GeoDataFrame with polygons that have enough addresses.
     """
 
-    min_addresses = min_addresses * n_days
-    max_addresses = max_addresses * n_days
+    if n_days is not None:
+        if n_days <= 0:
+            raise ValueError("n_days must be greater than 0 to calculate daily averages.")
+        print(f"Using {n_days} days for address calculations to return daily averages.")
+        min_addresses = min_addresses * n_days
+        max_addresses = max_addresses * n_days
 
     if min_addresses <= 0:
         raise ValueError("min_addresses must be greater than 0")
-
     if max_addresses <= 0:
         raise ValueError("max_addresses must be greater than 0")
     if min_addresses > max_addresses:
@@ -90,7 +93,7 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         warnings.warn("Total number of addresses is less than min_addresses, returning sum of all geometries.")
         return gdf_new.dissolve(by="can_be_merged", as_index=False, aggfunc="first").reset_index(drop=True)
     if any(gdf_new["n_addresses"] > max_addresses):
-        print(f"Warning: Polygons with ids {sum(gdf_new[gdf_new['n_addresses'] > max_addresses].merged_ids.tolist(), [])} already have more than maximum of {max_addresses} addresses on average.")
+        print(f"Warning: Polygons with ids {sum(gdf_new[gdf_new['n_addresses'] > max_addresses].merged_ids.tolist(), [])} already have more than maximum of {max_addresses} addresses.")
 
     gdf_new = sort_polygons_spatially(gdf_new)
     gdf_new.reset_index(drop=True, inplace=True)
@@ -143,7 +146,7 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
 
     remaining_to_merge = gdf_new[gdf_new.must_be_merged].copy()
     if not remaining_to_merge.empty:
-        warnings.warn(f"Some polygons have less than {min_addresses/n_days} addresses on average, merging them without maximum address limit")
+        warnings.warn(f"Some polygons have less than {min_addresses/n_days} addresses, merging them without maximum address limit")
         for index, row in remaining_to_merge.iterrows():
             neighbors = gdf_new[gdf_new.geometry.apply(lambda x: shared_border(x, row.geometry) is not None)].copy()
             if row.name in neighbors.index:
@@ -167,9 +170,13 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
             gdf_new = gdf_new.drop([row.name, best_neighbor.name])
             gdf_new = pd.concat([new_row, gdf_new])
     gdf_new.drop(columns=["addresses_centroid", "can_be_merged", "must_be_merged"], inplace=True)
-    gdf_new["avg_addresses"] = gdf_new["n_addresses"] / n_days
-    gdf_new.drop(columns=["n_addresses"], inplace=True)
+
+    if n_days is not None:
+        gdf_new["avg_addresses"] = gdf_new["n_addresses"] / n_days
+        gdf_new.drop(columns=["n_addresses"], inplace=True)
+    
     return gdf_new
+
 
 
 
