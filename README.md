@@ -1,232 +1,244 @@
-# Praktyki Project
+# Geospatial Partitioning and Merging Tool
 
-This project is a Python-based geospatial data processing toolkit. It leverages GeoPandas and NumPy to analyze, filter, and process spatial data, particularly for urban infrastructure such as streets, addresses, and boundaries.
+This Python-based tool enables spatial optimization of geographic zones by splitting ("cut") and combining ("merge") areas based on address distribution and routing efficiency. It is particularly useful for applications such as courier zone planning or logistics delivery route optimization.
 
 ---
 
-## Project Structure
+## Features
+
+### `cut`: Area Partitioning
+
+The `cut` operation recursively divides spatial areas into smaller sub-regions that each meet a minimum threshold of address points. It uses geographic and OSM-derived attributes to determine optimal cutting lines.
+
+* Retrieves area and address data from a PostgreSQL/PostGIS database.
+* Accepts one or more area identifiers (IDs) and splits them based on address count.
+* Uses user-defined weights for OpenStreetMap attributes to influence cut lines (e.g., `highway=primary` = weight 5).
+* Results include: number of addresses per resulting area, adjacency relationships, and border weights. These are saved back into the database.
+
+### `merge`: Area Aggregation
+
+The `merge` operation combines smaller regions into larger ones while satisfying minimum and maximum thresholds for address count.
+
+* Fetches address and area data from PostgreSQL/PostGIS.
+* Uses OSRM (Open Source Routing Machine) to compute shortest travel times between region centroids.
+* Merges are optimized for spatial contiguity and time-based proximity.
+* Outputs include: number of addresses per merged area, and lists of source area IDs, written to the database.
+
+---
+
+## Requirements
+
+To run the tool, you need the following components:
+
+* Python ≥ 3.13.3
+* Required Python libraries (install via `requirements.txt`)
+* OpenStreetMap data in `.osm.pbf` format (e.g., from Geofabrik)
+* Docker and a running OSRM instance
+* PostgreSQL with PostGIS and HStore extensions
+* osm2pgsql tool for loading OSM data into Postgres
+* A PostgreSQL database with:
+
+  * Table of areas (polygons)
+  * Table of addresses (points)
+  * Table with street geometries and relevant OSM tags
+* A completed config file (`db_config.json`, based on `sample_db_config.json`)
+
+---
+
+## Installation and Setup
+
+### Clone Repository and Install Dependencies
+
 ```bash
-.
-├── .gitignore
-├── sample_db_config.json      # Example config in required format
-├── main.py                    # Entry point
-├── README.md
-├── requirements.txt
-└── src/                       # Main source code
-    ├── logic_config.py        # Configuration for global variables
-    ├── utils.py               # Utility functions
-    ├── handle_database/       # Database I/O logic
-    │   ├── db_io.py
-    │   └── default_weights.csv
-    ├── merge/                 # Merging logic and execution
-    │   ├── merge_logic.py
-    │   └── run_merge.py
-    ├── partition/             # Partitioning logic and execution
-    │   ├── better_cuts_beta.py
-    │   ├── cuts_logic.py
-    │   ├── intersections_logic.py
-    │   └── run_partition.py
-
-```
----
-
-## Installation
-
-This project requires Python 3. You can install all necessary dependencies using the provided `requirements.txt` file:
-
-
+git clone https://github.com/your-username/geospatial-tool.git
+cd geospatial-tool
 pip install -r requirements.txt
+```
+
+### Download OSM Data
+
+Get the OSM data for your region:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate      # On Windows
-source .venv/bin/activate  # On Linux/macOS
-pip install -r requirements.txt
+wget https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf
 ```
 
----
+### Set Up Docker and OSRM
 
-## Database Requirements & Setup
-
-This project requires access to a **PostgreSQL** database with the **PostGIS** extension enabled. The database is used to store and query spatial data (areas, addresses, OSM data, etc.).
-
-### Required Data in the Database
-
-Your PostgreSQL/PostGIS database must contain the following spatial datasets:
-
-- **OpenStreetMap (OSM) street geometries**: A table with street line geometries (e.g., from OSM extracts), used for routing and partitioning. Each row should represent a street segment with geometry in a supported CRS.
-- **Polygon areas with IDs**: A table of polygons (e.g., administrative boundaries, districts, or custom areas) with a unique area ID column. These are the regions to be partitioned/cut.
-- **Addresses as points**: A table of address points (e.g., building entrances, address locations) with geometry. Optionally, include a `teryt` column (or similar administrative code) to speed up filtering and calculations for large datasets.
-
-**Summary Table Requirements:**
-
-| Table         | Geometry Type | Required Columns                | Optional Columns |
-|---------------|---------------|---------------------------------|------------------|
-| OSM Streets   | LineString    | geometry                        | attributes as needed |
-| Areas         | Polygon       | geometry, area_id               |                 |
-| Addresses     | Point         | geometry                        | teryt           |
-
-All tables should have their geometry columns properly indexed for spatial queries. The CRS (coordinate reference system) for each table must be specified in your config file.
-
-You can import data using tools like `ogr2ogr`, QGIS, or `psql`.
-
-
-### 1. Install PostgreSQL and PostGIS
-
-- Download and install PostgreSQL: https://www.postgresql.org/download/
-- During installation, select the option to install **StackBuilder** and use it to add the **PostGIS** extension.
-
-### 2. Create a Database and Enable PostGIS
-
-After installing PostgreSQL, create a new database (e.g., `spatialdb`) and enable PostGIS:
-
-```sql
-CREATE DATABASE spatialdb;
-\c spatialdb
-CREATE EXTENSION postgis;
-```
-
-### 3. Database Configuration
-
-The connection details (host, port, user, password, database name) are specified in a JSON config file (default: `db_config.json`). Example:
-
-```json
-{
-  "connection": {
-    "host": "localhost",
-    "port": 5432,
-    "user": "your_username",
-    "password": "your_password",
-    "database": "spatialdb"
-  },
-  "weights": {...},
-  "data_for_partition": {...},
-  ...
-}
-```
-
-**Note:** You must provide the correct table names and CRS (coordinate reference system) for your data in the config file. See the sample config for details.
-
-The calculated cuts (partition or merge results) will be saved to the output table specified in your config file under the `output` section. Make sure this table name is set and you have write access to the database.
-
-
----
-
-## Setting Up OSRM (Open Source Routing Machine)
-
-This project uses OSRM to compute driving routes. To run the routing functionality correctly, you'll need to set up a local OSRM server using Docker.
-
-> **Reference**: Official OSRM repository with full documentation and setup:
-> [https://github.com/Project-OSRM/osrm-backend](https://github.com/Project-OSRM/osrm-backend)
-
-
-### 1. Prerequisites
-
-* **Docker Desktop**
-  Download and install Docker from: [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
-  Make sure Docker is running before continuing.
-
-* **OpenStreetMap data**
-  Download the region you're interested in from [Geofabrik](https://download.geofabrik.de/).
-  Example (using mazowieckie voivodeship in Poland):
-
-  ```bash
-  wget https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf
-  ```
-
----
-
-### 2. Preprocessing OSM Data
-
-In the folder where your `.osm.pbf` file is located, run the following commands to preprocess the data using Docker (replace filenames accordingly):
+1. Install Docker Desktop.
+2. In the directory with your `.osm.pbf` file, run:
 
 ```bash
-# Extract routing data for car profile
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/mazowieckie-latest.osm.pbf
-
-# Partition the graph
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/mazowieckie-latest.osrm
-
-# Customize for efficient routing
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/mazowieckie-latest.osrm
 ```
 
-Once this completes successfully, your data is ready to use.
-
----
-
-### 3. Running the OSRM Routing Server
-
-To run the OSRM routing server (required for the Python routing scripts), do the following:
-
-1. Ensure **Docker is running** in the background.
-2. Open a terminal in the folder that contains your preprocessed `.osrm` files.
-3. Start the OSRM routing engine with:
+To start the server:
 
 ```bash
 docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
 ```
 
-4. If successful, you should see a message like:
+---
 
+## Setting Up the PostgreSQL Database
+
+### PostGIS and Extensions
+
+Ensure you have the necessary extensions:
+
+```sql
+CREATE EXTENSION postgis;
+CREATE EXTENSION hstore;
 ```
-[info] Listening on: 0.0.0.0:5000
-[info] running and waiting for requests
+
+### Import OSM Data
+
+Use `osm2pgsql` to import OSM geometries into your database:
+
+```bash
+osm2pgsql -d osm -U postgres --create --slim --hstore -C 2000 -G --number-processes 4 mazowieckie-latest.osm.pbf
 ```
 
-This means the local OSRM server is ready and listening on `http://localhost:5000`. You can now run the Python scripts that query routes using this server.
+### Required Tables
 
+#### Areas Table
+
+* Must include:
+
+  * `id`: unique area identifiers
+  * `geom`: geometry column (Polygon)
+
+#### Addresses Table
+
+* Must include:
+
+  * `geom`: Point geometries
+* Optional:
+
+  * `timestamp`: for time-based filtering
+  * `teryt`: administrative ID for optional filtering
+
+#### OSM Geometry Table
+
+* Must include:
+
+  * `geom`: LineString or MultiLineString geometries
+  * OSM attributes (e.g., `highway`, `waterway`, etc.)
+
+---
+
+## Configuration File (`db_config.json`)
+
+See `sample_db_config.json` for structure. Key sections include:
+
+### Database Connection
+
+```json
+"connection": {
+  "host": "localhost",
+  "port": 5432,
+  "name": "your_database",
+  "user": "your_user",
+  "password": "your_password"
+}
+```
+
+### Weights
+
+```json
+"weights": {
+  "default_weights_path": "path/to/default_weights.csv"
+}
+```
+
+CSV must have columns: `osm_key`, `osm_value`, `weight`
+
+### Data for `cut` and `merge`
+
+Defined under `data_for_partition` and `data_for_merge`. Each includes configuration for:
+
+* `addresses`: table, geometry column, optional filters (e.g., `teryt`, `timestamp`)
+* `areas`: table, geometry and ID columns
+* `osm_data`: OSM geometry table and CRS
+* `output`: table name and CRS for storing results
 
 ---
 
 ## Running the Program
 
+### Start OSRM Server
 
-Once the database and OSRM server are set up, you can run the main script for either partitioning (cutting) or merging areas.
-
-### Partitioning (Cutting) Areas
-
-The tool supports partitioning (cutting) areas into smaller polygons based on address distribution and OSM street network. This is useful for dividing large service areas into balanced, address-based regions.
-
-**Requirements:**
-- The database must contain polygon areas, address points, and OSM street geometries (see database section above).
-- The config file must specify the relevant tables and columns under `data_for_partition`.
-- A weights CSV file must be provided (or specified in the config) to control the cost of traversing different street types.
-
-**Example usage:**
+Before running the tool, make sure OSRM is running in the background:
 
 ```bash
-python main.py cut --area_id <AREA_ID> --min_addresses <MIN_ADDR> --weights_path <WEIGHTS_CSV>
+docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
 ```
 
-- `<AREA_ID>`: ID prefix of the areas to cut
-- `<MIN_ADDR>`: Minimum number of addresses per resulting piece
-- `<WEIGHTS_CSV>`: Path to the weights CSV file (optional if set in config)
+### Basic Command Structure
 
-The partitioned (cut) results will be saved to the output table specified in your config file under the `data_for_partition` section.
+#### Cut Operation
 
-See the `main.py` docstring and argument help for more details on available options.
+```bash
+python main.py cut --area_id <ID> --min_addresses <MIN>
+```
+
+#### Merge Operation
+
+```bash
+python main.py merge --area_id <ID(s)> --min_addresses <MIN> --max_addresses <MAX>
+```
+
+### Optional Arguments
+
+* `--weights_path <path>`: Custom CSV for OSM weights
+* `--avg`: Use average address count over time period
+* `--teryt_id <id>`: Filter addresses by administrative ID
+* `--output_table <name>`: Override default output table
+* `--config <path>`: Use a different config file
+
+### Examples
+
+```bash
+python main.py cut --area_id 1234 --min_addresses 20
+python main.py merge --area_id 123 7890 --min_addresses 10 --max_addresses 20 --avg
+```
 
 ---
 
-### Merging Areas
+## Example Output
 
-The tool also supports merging areas based on address density and shortest route calculations. This is useful for aggregating small polygons into larger ones, e.g., for service area optimization.
+### Cut
 
-**Requirements:**
-- The database must contain address points with a time period column (see config example).
-- The config file must specify the relevant tables and columns under `data_for_merge`.
-
-**Example usage:**
-
-```bash
-python main.py merge --area_id <AREA_ID> --min_addresses <MIN_ADDR> --max_addresses <MAX_ADDR>
+```
+Partitioned polygon 146201_1.0010 into 10 parts.
+Saved result to table cut_results_146.
 ```
 
-- `<AREA_ID>`: ID prefix of the areas to merge
-- `<MIN_ADDR>`: Minimum number of addresses (daily average) required in a merged polygon
-- `<MAX_ADDR>`: Maximum number of addresses (daily average) allowed in a merged polygon
+### Merge
 
-The merged results will be saved to the output table specified in your config file under the `data_for_merge` section.
+```
+Merged 242 polygons into 44 aggregated regions.
+Saved result to table merge_results_123.
+```
 
-See the `main.py` docstring and argument help for more details on available options.
+---
+
+## Future Development
+
+* Add support for generating custom OSRM profiles based on user-defined weights
+* Enable merge operations based on border weights (similar to cut)
+* Combine cut and merge logic into a single adaptive tool
+
+---
+
+## License
+
+MIT License
+
+---
+
+## Contact
+
+For feedback or contributions, please open an issue or contact the project maintainer.

@@ -3,12 +3,12 @@ import requests
 import polyline
 import warnings
 import pandas as pd
-from shapely.geometry import Polygon, LineString, MultiLineString
+from shapely.geometry import Polygon, LineString, MultiLineString, Point
 from shapely.ops import linemerge
 import numpy as np
 from shapely.geometry import MultiPoint
 
-import src.logic_config as logic_config
+import src.logic_config as logic_config 
 
 
 def get_osrm_route(
@@ -144,20 +144,68 @@ def addresses_inside_polygon(
     return possible_matches[possible_matches.within(polygon)]
 
 
-def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    def compute_angle(point, origin):
-        dx = point.x - origin.x
-        dy = point.y - origin.y
-        angle = np.arctan2(dy, dx)
-        return angle
-    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
-    gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
-    origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
-    gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
-    gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
-    gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
-    gdf_sorted = gdf_sorted.to_crs(gdf.crs)
 
+def sort_by_distance_from_point(
+    gdf: gpd.GeoDataFrame, point: Point
+) -> gpd.GeoDataFrame:
+    """
+    Sorts a GeoDataFrame of polygons by their distance to a given point.
+
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        point (Point): The point to measure distance from.
+
+    Returns:
+        gpd.GeoDataFrame: Sorted GeoDataFrame.
+    """
+    gdf = gdf.copy()
+    gdf["distance"] = gdf.geometry.distance(point)
+    gdf = gdf.sort_values("distance", ascending=False)
+    gdf.drop(columns=["distance"], inplace=True)
+    return gdf
+
+
+def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame, how:str, pts = None) -> gpd.GeoDataFrame:
+    '''Sorts outer polygons spatially based on a given method and points.
+    Args:
+        gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        how (str): Method to sort polygons. Options are 'angle' or 'distance'.
+        pts (gpd.GeoDataFrame, optional): Points to consider for sorting, if how == 'distance' (distance is measured from centroid of these points).
+            If None, uses the union of polygons.
+
+        Returns:
+            gpd.GeoDataFrame: Sorted GeoDataFrame.
+    '''
+
+    if how not in ['angle', 'distance']:
+        raise ValueError("Parameter 'how' must be either 'angle' or 'distance'.")
+    
+    pts_inside = addresses_inside_polygon(gdf.union_all(), pts).copy() if not pts.empty else None
+    if pts_inside is not None and pts_inside.empty:
+        warnings.warn("No points inside the polygons, sorting by polygon centroid distance.")
+        pts_inside = None
+    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
+    
+    if how == 'distance':
+        # Sort polygons by distance from the centroid
+        pts_metr = pts_inside.to_crs(logic_config.metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
+        pts_centroid = MultiPoint(pts_metr.geometry.tolist()).centroid if isinstance(pts_metr, gpd.GeoDataFrame) else pts_metr
+        gdf_sorted = sort_by_distance_from_point(gdf_sorted, pts_centroid)
+        gdf_sorted = gdf_sorted.to_crs(gdf.crs)
+        
+    elif how == 'angle':
+        def compute_angle(point, origin):
+            dx = point.x - origin.x
+            dy = point.y - origin.y
+            angle = np.arctan2(dy, dx)
+            return angle
+        gdf_sorted["centroid"] = gdf_sorted.geometry.centroid
+        origin = MultiPoint(gdf_sorted["centroid"].tolist()).centroid
+        gdf_sorted["angle"] = gdf_sorted["centroid"].apply(lambda p: compute_angle(p, origin))
+        gdf_sorted = gdf_sorted.sort_values("angle", ascending=False)
+        gdf_sorted = gdf_sorted.drop(columns=["centroid", "angle"])
+    
+    gdf_sorted = gdf_sorted.to_crs(gdf.crs)
     polygons_union = gdf_sorted.geometry.union_all()
     if not isinstance(polygons_union, Polygon):
         return gdf_sorted, gpd.GeoDataFrame(geometry=[], crs=gdf_sorted.crs)
@@ -168,17 +216,19 @@ def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 
-def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def sort_polygons_spatially(gdf: gpd.GeoDataFrame, how = 'angle', pts = None) -> gpd.GeoDataFrame:
     """
     Sorts polygons spatially from outermost to innermost, each layer clockwise.
 
     Args:
         gdf (gpd.GeoDataFrame): GeoDataFrame of polygons.
+        how (str): Method to sort polygons. Options are 'angle' or 'distance'.
+        pts (gpd.GeoDataFrame, optional): Points to consider for sorting, if how == 'distance'.
 
     Returns:
         gpd.GeoDataFrame: Sorted GeoDataFrame.
     """
-    outer_polygons, remaining = sort_outer_polygons_spatially(gdf)
+    outer_polygons, remaining = sort_outer_polygons_spatially(gdf, how, pts)
     gdf_sorted = outer_polygons.copy()
     while len(remaining) > 0:
         prev_len = len(remaining)
@@ -189,9 +239,12 @@ def sort_polygons_spatially(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         remaining = remaining.drop(index=outer_polygons.index)
         gdf_sorted = gdf_sorted.reset_index(drop=True)
 
-        if len(remaining) == prev_len:
-            warnings.warn("No more outer polygons found, stopping sorting.")
+        if len(remaining) == prev_len and len(remaining) > 0:
+            warnings.warn(f"No more outer polygons found, stopping sorting.\nNumber of remaining polygons: {len(remaining)}")
             gdf_sorted = pd.concat([gdf_sorted, remaining], ignore_index=True)
+            break
+        elif len(remaining) == 0:
+            print("All polygons sorted successfully.")
             break
     return gdf_sorted
 
@@ -217,20 +270,34 @@ def shared_border(poly1, poly2):
 
 
 def extend_linestring(line, distance: float) -> LineString:
-        if not isinstance(line, LineString) or len(line.coords) < 2:
-            return line  # Return unchanged for non-LineStrings or degenerate lines
+    if not isinstance(line, LineString) or len(line.coords) < 2:
+        return line  # Return unchanged for non-LineStrings or degenerate lines
 
-        coords = np.array(line.coords)
+    # Use interpolation to get direction at start and end
+    # Interpolate a small fraction along the line to get a second point
+    frac = 1  # Small fraction for interpolation
 
-        # Extend start
-        v_start = coords[0] - coords[1]
-        v_start /= np.linalg.norm(v_start)
-        new_start = coords[0] + distance * v_start
+    # Start direction
+    start_pt = line.interpolate(0)
+    next_pt = line.interpolate(frac)
+    v_start = np.array(next_pt.coords[0]) - np.array(start_pt.coords[0])
+    norm_start = np.linalg.norm(v_start)
+    if norm_start == 0:
+        return line  # Degenerate at start
+    v_start /= norm_start
+    new_start = np.array(start_pt.coords[0]) - distance * v_start
 
-        # Extend end
-        v_end = coords[-1] - coords[-2]
-        v_end /= np.linalg.norm(v_end)
-        new_end = coords[-1] + distance * v_end
+    # End direction
+    end_pt = line.interpolate(line.length)
+    prev_pt = line.interpolate(line.length - frac)
+    v_end = np.array(end_pt.coords[0]) - np.array(prev_pt.coords[0])
+    norm_end = np.linalg.norm(v_end)
+    if norm_end == 0:
+        return line  # Degenerate at end
+    v_end /= norm_end
+    new_end = np.array(end_pt.coords[0]) + distance * v_end
 
-        new_coords = [tuple(new_start)] + [tuple(pt) for pt in coords[1:-1]] + [tuple(new_end)]
-        return LineString(new_coords)
+    # Build new coordinates
+    coords = list(line.coords)
+    new_coords = [tuple(new_start)] + coords[1:-1] + [tuple(new_end)]
+    return LineString(new_coords)

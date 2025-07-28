@@ -16,6 +16,11 @@
       "addresses_table": "your_addresses_table",
       "addresses_geom_column": "your_geom_column",
       "teryt_column": "teryt",
+      "time_period": {
+        "column_name": "your_time_column", 
+        "start": "YYYY-MM-DD",  
+        "end": "YYYY-MM-DD"
+      },
       "crs": "EPSG:XXXX"
     },
     "areas": {
@@ -40,12 +45,12 @@
       "addresses_table": "your_merge_addresses_table",
       "addresses_geom_column": "your_merge_geom_column",
       "teryt_column": null,
-      "crs": "EPSG:XXXX",
       "time_period": {
         "column_name": "your_time_column", 
         "start": "YYYY-MM-DD",  
         "end": "YYYY-MM-DD" 
-      }
+      },
+      "crs": "EPSG:XXXX"
     },
     "areas": {
       "area_table": "your_merge_areas_table",

@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, text
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import box
+from datetime import datetime
 
 
 def connect(connection_config: dict) -> sqlalchemy.engine.Engine:
@@ -24,7 +25,7 @@ def connect(connection_config: dict) -> sqlalchemy.engine.Engine:
 def load_area(
         engine: "sqlalchemy.engine.base.Engine",
         areas_cfg: dict,
-        area_id: str
+        area_id: str | list[str]
     ) -> gpd.GeoDataFrame:
     """
     Loads area geometries from a database table based on a given area ID prefix.
@@ -40,14 +41,31 @@ def load_area(
     Raises:
         ValueError: If no areas are found with the specified area ID prefix.
     """
+    from sqlalchemy import text
+
     areas_table_name = areas_cfg["area_table"]
     id_column_name = areas_cfg["area_id_column"]
-    query = text(f"SELECT * FROM {areas_table_name} WHERE {id_column_name}::text LIKE :area_id")
-    params = {"area_id": f"{area_id}%"}
+
+    if isinstance(area_id, list):
+        like_clauses = []
+        params = {}
+
+        for i, prefix in enumerate(area_id):
+            param_name = f"prefix_{i}"
+            like_clauses.append(f"{id_column_name}::text LIKE :{param_name}")
+            params[param_name] = f"{prefix}%"
+
+        where_clause = " OR ".join(like_clauses)
+        query = text(f"SELECT * FROM {areas_table_name} WHERE {where_clause}")
+
+    else:
+        query = text(f"SELECT * FROM {areas_table_name} WHERE {id_column_name}::text LIKE :area_id")
+        params = {"area_id": f"{area_id}%"}
 
     area_geom_column_name = areas_cfg["area_geom_column"]
     gdf = gpd.read_postgis(query, engine, geom_col=area_geom_column_name, params=params)
-    gdf = gdf.rename_geometry("geometry")
+    if area_geom_column_name != "geometry":
+        gdf = gdf.rename_geometry("geometry")
     print(f"Loaded {len(gdf)} areas with ID prefix {area_id} from table {areas_table_name}.")
 
     if gdf.empty:
@@ -80,24 +98,41 @@ def load_addresses(
     """
     addresses_table_name = addresses_cfg["addresses_table"]
     addresses_geom_column_name = addresses_cfg["addresses_geom_column"]
-    teryt_column_name = addresses_cfg.get("teryt_column")
-    date_column_name = addresses_cfg.get("date_column")
 
     where_clauses = []
     params = {}
 
-    if teryt_id is not None and teryt_column_name is not None:
-        where_clauses.append(f"{teryt_column_name}::text LIKE :area_id")
-        params["area_id"] = f"{teryt_id}%"
+    filtered_by_teryt_id = False
+    filtered_by_time_period = False
+    filtered_by_bbox = False
 
-    time_period = addresses_cfg.get("time_period")
-    date_column_name = time_period.get("column_name") if time_period else date_column_name
+    # Filter by TERYT_ID if provided
+    if teryt_id is not None:
+        teryt_column_name = addresses_cfg.get("teryt_column")
+        if teryt_column_name is None:
+            raise ValueError("TERYT ID provided but 'teryt_column' not specified in addresses configuration.")
+        else:
+            print(f"Filtering addresses by TERYT ID: {teryt_id} using column '{teryt_column_name}'")
+            where_clauses.append(f"{teryt_column_name}::text LIKE :area_id")
+            params["area_id"] = f"{teryt_id}%"
+            filtered_by_teryt_id = True
 
-    if time_period is not None and date_column_name is not None:
-        where_clauses.append(f"{date_column_name} BETWEEN :start_date AND :end_date")
-        params["start_date"] = time_period["start"]
-        params["end_date"] = time_period["end"]
+    # Filter by time period if provided
+    time_period_cfg = addresses_cfg.get("time_period")
+    if time_period_cfg is not None:
+        time_column_name = time_period_cfg.get("column_name")
+        start = time_period_cfg.get("start")
+        end = time_period_cfg.get("end")
+        if time_column_name is None or start is None or end is None:
+            print("Time period configuration is incomplete, skipping time filtering.")
+        else:
+            print(f"Filtering addresses by time period: {start} to {end} using column '{time_column_name}'")
+            where_clauses.append(f"{time_column_name} BETWEEN :start_date AND :end_date")
+            params["start_date"] = start
+            params["end_date"] = end
+            filtered_by_time_period = True
 
+    # Filter by bounding box if provided
     if bbox is not None:
         # bbox: (minx, miny, maxx, maxy)
         epsg_num = addresses_cfg.get("crs").split(":")[1]
@@ -105,6 +140,7 @@ def load_addresses(
             f"ST_Intersects({addresses_geom_column_name}, ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, {epsg_num}))"
         )
         params.update({"minx": bbox[0], "miny": bbox[1], "maxx": bbox[2], "maxy": bbox[3]})
+        filtered_by_bbox = True
 
     where_sql = ""
     if where_clauses:
@@ -112,19 +148,43 @@ def load_addresses(
 
     query = text(f"SELECT * FROM {addresses_table_name}{where_sql}")
     gdf = gpd.read_postgis(query, engine, geom_col=addresses_geom_column_name, params=params)
-    gdf = gdf.rename_geometry("geometry")
+    
+    if addresses_geom_column_name != "geometry":
+        gdf = gdf.rename_geometry("geometry")
+
     print(
         f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
-        f"{'teryt_id = ' + str(teryt_id) if teryt_id is not None else ''}"
-        f"{'time_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-        f"{'bbox = ' + str(bbox) if bbox is not None else ''}"
+        f"{'\nteryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''}"
+        f"{'\ntime_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
+        f"{'\nbbox = ' + str(bbox) if filtered_by_bbox else ''}"
     )
     if gdf.empty:
         raise ValueError(f"No addresses found in table {addresses_table_name} with the given criteria: "
-                 f"{'teryt_id = ' + str(teryt_id) if teryt_id is not None else ''} "
-                 f"{'time_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-                 f"{'bbox = ' + str(bbox) if bbox is not None else ''}.")
+                 f"{'\nteryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''} "
+                 f"{'\ntime_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
+                 f"{'\nbbox = ' + str(bbox) if filtered_by_bbox else ''}.")
     return gdf
+
+
+def get_num_days_from_time_period(addresses_cfg: dict) -> int:
+    """
+    Calculates the number of days for the given addresses configuration.
+
+    Args:
+        addresses_cfg (dict): The addresses configuration dictionary.
+
+    Returns:
+        int: The number of days.
+    """
+    # Calculate number of days in the specified time period if all values are not null
+    time_period = addresses_cfg.get("time_period")
+    if time_period and all(time_period.get(k) is not None for k in ["start", "end"]):
+        start = datetime.fromisoformat(time_period["start"])
+        end = datetime.fromisoformat(time_period["end"])
+        num_days = (end - start).days
+        return num_days + 1
+    else:
+        raise ValueError("Can't calculate average daily number of addresses. Time period not specified or incomplete in addresses configuration.")
 
 
 def load_weights_from_csv(path: str | None, weights_config: dict) -> "pd.DataFrame":
@@ -187,8 +247,11 @@ def load_osm_data(
     if gdf.empty:
         raise ValueError(f"No OSM data found in table {osm_data_cfg['table']}.")
     print(f"Loaded OSM data ({len(gdf)} rows) from table {osm_data_cfg['table']}."
-          f"{'bbox=' + str(bbox) if bbox is not None else ''}")
-    gdf = gdf.rename_geometry("geometry")
+          f"{'\nbbox=' + str(bbox) if bbox is not None else ''}")
+    
+    if geom_col != "geometry":
+        gdf = gdf.rename_geometry("geometry")
+    
     return gdf
 
 
