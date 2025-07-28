@@ -161,7 +161,7 @@ Defined under `data_for_partition` and `data_for_merge`. Each includes configura
 
 * `addresses`: table, geometry column, optional filters (e.g., `teryt`, `timestamp`)
 * `areas`: table, geometry and ID columns
-* `osm_data`: OSM geometry table and CRS
+* `osm_data`: OSM geometry table and CRS (currently required only for `data_for_partition`
 * `output`: table name and CRS for storing results
 
 ---
@@ -193,7 +193,7 @@ python main.py merge --area_id <ID(s)> --min_addresses <MIN> --max_addresses <MA
 ### Optional Arguments
 
 * `--weights_path <path>`: Custom CSV for OSM weights
-* `--avg`: Use average address count over time period
+* `--avg`: Use average address count over time period specified in the configuration file
 * `--teryt_id <id>`: Filter addresses by administrative ID
 * `--output_table <name>`: Override default output table
 * `--config <path>`: Use a different config file
@@ -212,14 +212,17 @@ python main.py merge --area_id 123 7890 --min_addresses 10 --max_addresses 20 --
 ### Cut
 
 ```
-Partitioned polygon 146201_1.0010 into 10 parts.
-Saved result to table cut_results_146.
+Partitioned polygon 146201_1.0007 into 18 pieces.
+
+Saved result to table cut_results_123.
 ```
 
 ### Merge
 
 ```
-Merged 242 polygons into 44 aggregated regions.
+Merging completed successfully.
+Number of merged polygons: 270 out of 477 original polygons.
+
 Saved result to table merge_results_123.
 ```
 
