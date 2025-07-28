@@ -10,7 +10,7 @@ from src.utils import (calculate_weight_by_buffer, addresses_inside_polygon, get
                        shared_border, sort_polygons_spatially, extend_linestring)
 
 
-from dev.show_shapes import show_shapes
+# from dev.show_shapes import show_shapes
 
 def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """

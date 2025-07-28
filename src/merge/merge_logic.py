@@ -152,7 +152,8 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
     # Handle remaining polygons that must be merged but cannot due to maximum address limit
     remaining_to_merge = gdf_new[gdf_new.must_be_merged].copy()
     if not remaining_to_merge.empty:
-        warnings.warn(f"Some polygons have less than {min_addresses/n_days} addresses, merging them without maximum address limit")
+        if n_days is not None:
+            warnings.warn(f"Some polygons have less than {min_addresses/n_days} addresses, merging them without maximum address limit")
 
         for index, row in remaining_to_merge.iterrows():
             neighbors = gdf_new[gdf_new.geometry.apply(lambda x: shared_border(x, row.geometry) is not None)].copy()

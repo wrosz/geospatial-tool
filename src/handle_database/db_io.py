@@ -154,15 +154,15 @@ def load_addresses(
 
     print(
         f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
-        f"{'\nteryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''}"
-        f"{'\ntime_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
-        f"{'\nbbox = ' + str(bbox) if filtered_by_bbox else ''}"
+        f"{'teryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''}"
+        f"{'time_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
+        f"{'bbox = ' + str(bbox) if filtered_by_bbox else ''}"
     )
     if gdf.empty:
         raise ValueError(f"No addresses found in table {addresses_table_name} with the given criteria: "
-                 f"{'\nteryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''} "
-                 f"{'\ntime_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
-                 f"{'\nbbox = ' + str(bbox) if filtered_by_bbox else ''}.")
+                 f"{'teryt_id = ' + str(teryt_id) if filtered_by_teryt_id else ''} "
+                 f"{'time_period = ' + str(time_period_cfg['start']) + ' to ' + str(time_period_cfg['end']) if filtered_by_time_period else ''} "
+                 f"{'bbox = ' + str(bbox) if filtered_by_bbox else ''}.")
     return gdf
 
 
@@ -247,7 +247,7 @@ def load_osm_data(
     if gdf.empty:
         raise ValueError(f"No OSM data found in table {osm_data_cfg['table']}.")
     print(f"Loaded OSM data ({len(gdf)} rows) from table {osm_data_cfg['table']}."
-          f"{'\nbbox=' + str(bbox) if bbox is not None else ''}")
+          f"{'bbox=' + str(bbox) if bbox is not None else ''}")
     
     if geom_col != "geometry":
         gdf = gdf.rename_geometry("geometry")
