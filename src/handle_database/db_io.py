@@ -115,15 +115,15 @@ def load_addresses(
     gdf = gdf.rename_geometry("geometry")
     print(
         f"Loaded {len(gdf)} addresses from table {addresses_table_name} with criteria:"
-        f"{'\nteryt_id = ' + str(teryt_id) if teryt_id is not None else ''}"
-        f"{'\ntime_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-        f"{'\nbbox = ' + str(bbox) if bbox is not None else ''}"
+        f"{'teryt_id = ' + str(teryt_id) if teryt_id is not None else ''}"
+        f"{'time_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+        f"{'bbox = ' + str(bbox) if bbox is not None else ''}"
     )
     if gdf.empty:
         raise ValueError(f"No addresses found in table {addresses_table_name} with the given criteria: "
-                 f"{'\nteryt_id = ' + str(teryt_id) if teryt_id is not None else ''} "
-                 f"{'\ntime_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
-                 f"{'\nbbox = ' + str(bbox) if bbox is not None else ''}.")
+                 f"{'teryt_id = ' + str(teryt_id) if teryt_id is not None else ''} "
+                 f"{'time_period = ' + str(time_period['start']) + ' to ' + str(time_period['end']) if time_period is not None else ''} "
+                 f"{'bbox = ' + str(bbox) if bbox is not None else ''}.")
     return gdf
 
 
@@ -185,9 +185,9 @@ def load_osm_data(
         query += f" WHERE {bbox_sql}"
     gdf = gpd.read_postgis(query, engine, geom_col=osm_data_cfg["geom_column"])
     if gdf.empty:
-        raise ValueError(f"\nNo OSM data found in table {osm_data_cfg['table']}.")
+        raise ValueError(f"No OSM data found in table {osm_data_cfg['table']}.")
     print(f"Loaded OSM data ({len(gdf)} rows) from table {osm_data_cfg['table']}."
-          f"{'\nbbox=' + str(bbox) if bbox is not None else ''}")
+          f"{'bbox=' + str(bbox) if bbox is not None else ''}")
     gdf = gdf.rename_geometry("geometry")
     return gdf
 
@@ -195,7 +195,7 @@ def load_osm_data(
 def load_all_data_with_bbox(engine, config, args):
     '''Loads all relevant data from the database within a specified bounding box.'''
 
-    print("\nLoading areas...")
+    print("Loading areas...")
     # Load data from database
     area  = load_area(engine, config["areas"], args.area_id)
     # Get bounding box of the union of area geometries
@@ -210,7 +210,7 @@ def load_all_data_with_bbox(engine, config, args):
         return bbox_gdf.geometry[0].bounds
     
     # Load addresses using bbox and teryt_id if provided
-    print("\nLoading adresses...")
+    print("Loading adresses...")
 
     bbox_reprojected = reproject_bbox(bbox, from_crs, config["addresses"]["crs"])
     teryt_id = args.teryt_id if args.teryt_id else None
@@ -224,7 +224,7 @@ def load_all_data_with_bbox(engine, config, args):
         return {"area": area, "addresses": addresses}
 
     # Load OSM data using bounding box
-    print("\nLoading OpenStreetMap data...")
+    print("Loading OpenStreetMap data...")
     bbox_reprojected = reproject_bbox(bbox, from_crs, config["osm_data"]["crs"])
     osm_data = load_osm_data(engine, config["osm_data"], bbox=bbox_reprojected)
 
@@ -253,4 +253,4 @@ def save_result(
     output_table = output_table or output_cfg["table"]
     gdf = gdf.to_crs(output_cfg["crs"])
     gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
-    print(f"\nSaved result to table {output_cfg["table"]}.")
+    print(f"Saved result to table {output_cfg['table']}.")
