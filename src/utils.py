@@ -180,16 +180,20 @@ def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame, how:str, pts = None) ->
     if how not in ['angle', 'distance']:
         raise ValueError("Parameter 'how' must be either 'angle' or 'distance'.")
     
-    pts_inside = addresses_inside_polygon(gdf.union_all(), pts).copy() if not pts.empty else None
-    if pts_inside is not None and pts_inside.empty:
-        warnings.warn("No points inside the polygons, sorting by polygon centroid distance.")
-        pts_inside = None
     gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
     
     if how == 'distance':
         # Sort polygons by distance from the centroid
-        pts_metr = pts_inside.to_crs(logic_config.metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
-        pts_centroid = MultiPoint(pts_metr.geometry.tolist()).centroid if isinstance(pts_metr, gpd.GeoDataFrame) else pts_metr
+
+        if pts is None or pts.empty:
+            pts_centroid = gdf_sorted.geometry.centroid
+
+        else:
+            pts = pts.to_crs(logic_config.metrical_crs)
+            pts_inside = addresses_inside_polygon(gdf.union_all(), pts).copy()
+            pts_metr = pts_inside.to_crs(logic_config.metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
+            pts_centroid = MultiPoint(pts_metr.geometry.tolist()).centroid if isinstance(pts_metr, gpd.GeoDataFrame) else pts_metr
+
         gdf_sorted = sort_by_distance_from_point(gdf_sorted, pts_centroid)
         gdf_sorted = gdf_sorted.to_crs(gdf.crs)
         

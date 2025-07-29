@@ -313,7 +313,9 @@ def save_result(
     Returns:
         None
     """
-    output_table = output_table or output_cfg["table"]
+    if output_table is None:
+        output_table = output_cfg["table"]
+
     gdf = gdf.to_crs(output_cfg["crs"])
-    gdf.to_postgis(output_cfg["table"], engine, if_exists="replace")
-    print(f"\nSaved result to table {output_cfg["table"]}.")
+    gdf.to_postgis(output_table, engine, if_exists="replace")
+    print(f"\nSaved result to table {output_table}.")
