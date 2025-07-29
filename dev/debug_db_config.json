@@ -1,0 +1,66 @@
+{
+  "connection": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "emapa",
+    "user": "postgres",
+    "password": "master15"
+  },
+
+  "weights": {
+      "default_weights_path": "src/handle_database/default_weights.csv"
+  },
+
+  "data_for_partition": {
+    "addresses": {
+      "addresses_table": "public.adresy_warszawski_zachodni",
+      "addresses_geom_column": "wkb_geometry",
+      "teryt_column": "teryt",
+      "crs": "EPSG:2180",
+      "time_period": {
+        "column_name": null,
+        "start": null,
+        "end": null
+      }
+    },
+    "areas": {
+      "area_table": "public.cut_results_123",
+      "area_id_column": "id",
+      "area_geom_column": "geometry",
+      "crs": "EPSG:4326"
+    },
+    "osm_data": {
+      "table": "osm.osm_line",
+      "geom_column": "way",
+      "crs": "EPSG:3857"
+    },
+    "output": {
+      "table": "cut_results_123",
+      "crs": "EPSG:4326"
+    }
+  },
+
+  "data_for_merge": {
+    "addresses": {
+      "addresses_table": "dbo.localized_parcels",
+      "addresses_geom_column": "geom",
+      "teryt_column": null,
+      "crs": "EPSG:4326",
+      "time_period": {
+        "column_name": "time_stamp",
+        "start": "2023-01-01",
+        "end": "2023-12-31"
+      }
+    },
+    "areas": {
+      "area_table": "dbo.shapes",
+      "area_id_column": "unit_code",
+      "area_geom_column": "geom",
+      "crs": "EPSG:4326"
+    },
+    "output": {
+      "table": "merge_results_123",
+      "crs": "EPSG:4326"
+    }
+  }
+}

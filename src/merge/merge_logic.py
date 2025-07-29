@@ -43,6 +43,26 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         gpd.GeoDataFrame: Merged GeoDataFrame with polygons that have enough addresses.
     """
 
+    # helper function to calculate centroid of addresses inside a polygon
+    def addresses_centroid(poly):
+        """
+        Calculate the centroid of addresses inside a polygon.
+        
+        Args:
+            poly (shapely.geometry.Polygon): Polygon to check.
+            addresses (gpd.GeoDataFrame): GeoDataFrame containing address points.
+        
+        Returns:
+            shapely.geometry.Point: Centroid of addresses inside the polygon.
+        """
+        addresses_in_poly = addresses_inside_polygon(poly, addresses)
+        if not addresses_in_poly.empty:
+            return calculate_points_centroid(addresses_in_poly)
+        else:
+            return calculate_points_centroid(gpd.GeoDataFrame(geometry=[poly], crs=gdf_new.crs))
+
+
+    # Validate input parameters
     if n_days is not None:
         if n_days <= 0:
             raise ValueError("n_days must be greater than 0 to calculate daily averages.")
@@ -63,25 +83,6 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
     gdf_new = gdf_new.to_crs("EPSG:4326")  # Ensure CRS is set to WGS84 for OSRM compatibility
     addresses = addresses.to_crs("EPSG:4326")  # Ensure addresses are in the same CRS
 
-
-    def addresses_centroid(poly):
-        """
-        Calculate the centroid of addresses inside a polygon.
-        
-        Args:
-            poly (shapely.geometry.Polygon): Polygon to check.
-            addresses (gpd.GeoDataFrame): GeoDataFrame containing address points.
-        
-        Returns:
-            shapely.geometry.Point: Centroid of addresses inside the polygon.
-        """
-        addresses_in_poly = addresses_inside_polygon(poly, addresses)
-        if not addresses_in_poly.empty:
-            return calculate_points_centroid(addresses_in_poly)
-        else:
-            return calculate_points_centroid(gpd.GeoDataFrame(geometry=[poly], crs=gdf_new.crs))
-
-
     # Initialize new GeoDataFrame with necessary columns
     gdf_new.reset_index(drop=True, inplace=True)
     gdf_new = gdf_new.drop(columns=id_col).copy()
@@ -97,7 +98,7 @@ def merge_polygons_by_shortest_route(gdf, addresses, min_addresses, max_addresse
         print(f"Warning: Polygons with ids {sum(gdf_new[gdf_new['n_addresses'] > max_addresses].merged_ids.tolist(), [])} already have more than maximum of {max_addresses} addresses.")
 
     # Sort polygons spatially to optimize merging (from outer-most to inner-most)
-    gdf_new = sort_polygons_spatially(gdf_new, how='distance', pts=addresses)
+    gdf_new = sort_polygons_spatially(gdf_new, how='angle', pts=addresses)
     gdf_new.reset_index(drop=True, inplace=True)
 
     # Initialize previous number of polygons to track changes

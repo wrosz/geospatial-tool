@@ -27,4 +27,3 @@ dist/
 
 # hidden files
 db_config.json
-dev/
