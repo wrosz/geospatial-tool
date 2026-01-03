@@ -327,7 +327,7 @@ def pieces_to_final_data(
     neighbors = gpd.sjoin(gdf, gdf, how="left", predicate="touches")
     gdf["neighbors"] = neighbors.groupby(neighbors.index)["id_right"].apply(list)
     gdf["neighbors"] = gdf["neighbors"].apply(
-        lambda x: sorted([i for i in x if not pd.isna(i)]) if isinstance(x, list) else []
+        lambda x: sorted([int(i) for i in x if not pd.isna(i)]) if isinstance(x, list) else []
     )
 
     # add a dictionary of border weights
@@ -339,6 +339,7 @@ def pieces_to_final_data(
         geom = list(border.geoms) if isinstance(border, MultiLineString) else [border]
         border = gpd.GeoDataFrame(geometry=geom, crs=metrical_crs)
         return calculate_weight_by_buffer(border, streets, weights)
+    
     gdf["weights"] = gdf.apply(
         lambda row: {neigh: calculate_border_weight(row.name, neigh) for neigh in row["neighbors"]},
         axis=1,
@@ -349,6 +350,7 @@ def pieces_to_final_data(
 
 # | Final function to partition multiple polygons
 
+
 def partition_polygons(
     polygons: gpd.GeoDataFrame,
     streets: gpd.GeoDataFrame,
@@ -358,9 +360,10 @@ def partition_polygons(
     id_column: str,
     top_weights_percentage: float = default_top_weights_percentage,
     n_days: int | None = None
-) -> gpd.GeoDataFrame:
+):
     """
-    Partitions multiple polygons into smaller pieces based on street routes and address distribution.
+    Generator that partitions multiple polygons into smaller pieces based on street routes 
+    and address distribution. Yields results one polygon at a time.
 
     Args:
         polygons (gpd.GeoDataFrame): GeoDataFrame of polygons to partition.
@@ -372,8 +375,8 @@ def partition_polygons(
         top_weights_percentage (float): Fraction of top-weighted cuts to consider.
         n_days (int | None): Number of days for average address calculation, if applicable.
 
-    Returns:
-        gpd.GeoDataFrame: Final GeoDataFrame with partitioned polygons, neighbors, and border weights.
+    Yields:
+        gpd.GeoDataFrame: GeoDataFrame with partitioned pieces for each polygon.
     """
     if n_days is not None:
         if n_days <= 0:
@@ -381,7 +384,6 @@ def partition_polygons(
         print(f"Using {n_days} days for address calculations to return daily averages.")
         min_addresses = min_addresses * n_days
 
-    dataframes = []
     polygons = polygons.to_crs(metrical_crs)
     addresses = addresses.to_crs(metrical_crs)
     streets = streets.to_crs(metrical_crs)
@@ -429,12 +431,11 @@ def partition_polygons(
         gdf = pieces_to_final_data(pieces, streets, weights)
         gdf["id"] = str(initial_id) + "." + gdf["id"].astype(str)
         print(f"Partitioned polygon {initial_id} into {len(gdf)} pieces.")
-        dataframes.append(gdf)
-    
-    result = pd.concat(dataframes, ignore_index=True).reset_index(drop=True)
 
-    if n_days is not None:
-        result["n_addresses"] = result["n_addresses"] / n_days
-        result.rename(columns={"n_addresses": "avg_addresses"}, inplace=True)
-    
-    return result
+        # Apply n_days transformation if needed
+        if n_days is not None:
+            gdf["n_addresses"] = gdf["n_addresses"] / n_days
+            gdf.rename(columns={"n_addresses": "avg_addresses"}, inplace=True)
+        
+        # Yield this polygon's results
+        yield gdf

@@ -298,24 +298,26 @@ def save_result(
         engine: "sqlalchemy.engine.Engine",
         gdf: "gpd.GeoDataFrame",
         output_cfg: dict,
-        output_table: str | None = None
+        output_table: str | None = None,
+        if_exists: str = "replace"
     ):
     """
     Saves a GeoDataFrame to a PostGIS table after reprojecting it to the specified CRS.
-
+    
     Args:
         engine (sqlalchemy.engine.Engine): SQLAlchemy engine connected to the target database.
         gdf (geopandas.GeoDataFrame): The GeoDataFrame containing spatial data to be saved.
         output_cfg (dict): Configuration dictionary with the following keys:
             - "crs" (str or dict): The target coordinate reference system for reprojection.
             - "table" (str): The name of the target table in the database.
-
+        output_table (str | None): Optional override for the output table name.
+        if_exists (str): How to behave if the table already exists. Options: 'replace', 'append', 'fail'.
+    
     Returns:
         None
     """
     if output_table is None:
         output_table = output_cfg["table"]
-
     gdf = gdf.to_crs(output_cfg["crs"])
-    gdf.to_postgis(output_table, engine, if_exists="replace")
-    print(f"\nSaved result to table {output_table}.")
+    gdf.to_postgis(output_table, engine, if_exists=if_exists)
+    print(f"Saved {len(gdf)} records to table {output_table} (mode: {if_exists}).")

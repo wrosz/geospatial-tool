@@ -1,3 +1,5 @@
+# script to debug main.py commands
+
 import argparse
 import sys
 from pathlib import Path
@@ -7,14 +9,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from main import get_arguments
 
+# enter the command you want to debug here
+command = 'cut --area_id 306401 --min_addresses 20'
+
 def main():
 
     if len(sys.argv) == 1:
         # import warnings
         # warnings.simplefilter("error")
-        sys.argv.extend(["merge",
-            "--area_id" ,"1419", "--min_addresses","2", "--max_addresses", "10", "--avg"
-        ])
+        sys.argv.extend(command.split())
 
     args = get_arguments(argv=sys.argv[1:])
     args.func(args)

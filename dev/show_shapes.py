@@ -1,3 +1,5 @@
+# Function to visualize a list of geospatial shapes with distinct colors and optional labels
+
 import geopandas as gpd
 import pandas as pd
 import matplotlib.pyplot as plt
