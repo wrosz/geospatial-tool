@@ -13,10 +13,10 @@
 
   "data_for_partition": {
     "addresses": {
-      "addresses_table": "public.adresy_warszawski_zachodni",
-      "addresses_geom_column": "wkb_geometry",
+      "addresses_table": "dbo.address",
+      "addresses_geom_column": "geom",
       "teryt_column": "teryt",
-      "crs": "EPSG:2180",
+      "crs": "EPSG:4326",
       "time_period": {
         "column_name": null,
         "start": null,
@@ -24,13 +24,13 @@
       }
     },
     "areas": {
-      "area_table": "public.cut_results_123",
+      "area_table": "cut_results_123",
       "area_id_column": "id",
       "area_geom_column": "geometry",
       "crs": "EPSG:4326"
     },
     "osm_data": {
-      "table": "osm.osm_line",
+      "table": "osm_pl.planet_osm_line",
       "geom_column": "way",
       "crs": "EPSG:3857"
     },

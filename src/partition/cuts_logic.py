@@ -1,7 +1,7 @@
 import geopandas as gpd
 import pandas as pd
 import warnings
-from shapely.geometry import Polygon, MultiLineString
+from shapely.geometry import Polygon, MultiLineString, GeometryCollection
 from shapely.ops import linemerge, split
 
 from src.logic_config import metrical_crs, streets_extension_distance, default_top_weights_percentage, buff
@@ -189,6 +189,7 @@ def cut_single_polygon(
 
     # add a column for a list of addresses inside each component a cut creates
     cuts["n_addresses"] = [None for _ in cuts.iterrows()]
+    cuts["result"] = [None for _ in cuts.iterrows()]
     polygon = polygon_gdf.geometry.iloc[0]
     for i, row in cuts.iterrows():
         line = row.geometry
@@ -196,6 +197,7 @@ def cut_single_polygon(
         cuts.at[i, "n_addresses"] = [
             len(addresses_inside_polygon(poly, addresses)) for poly in result.geoms
         ]
+        cuts.at[i, "result"] = result
         # If the cut results in more than two polygons, merge them based on shared borders
         # and re-calculate the number of addresses in the merged polygons
         if len(result.geoms) > 2:
@@ -209,6 +211,7 @@ def cut_single_polygon(
             cuts.at[i, "geometry"] = shared_border(
                 merged.geometry.iloc[0], merged.geometry.iloc[1]
             )
+            cuts.at[i, "result"] = GeometryCollection(list(merged.geometry))
             cuts.at[i, "n_addresses"] = [
                 len(addresses_inside_polygon(poly, addresses)) for poly in merged.geometry
             ]
@@ -256,10 +259,7 @@ def cut_single_polygon(
         addresses_difference(row.n_addresses) for _, row in cuts.iterrows()
     ]
     best_cut = cuts.loc[cuts["n_addresses_diff"].idxmin()]
-
-
-    best_line = best_cut.geometry
-    best_result = split(polygon, extend_linestring(best_line, streets_extension_distance))
+    best_result = best_cut.result
     best_result = pd.DataFrame(list(best_result.geoms))
     poly1 = best_result.iloc[0]
     poly2 = best_result.iloc[1]
@@ -429,7 +429,7 @@ def partition_polygons(
             top_weights_percentage
         )
         gdf = pieces_to_final_data(pieces, streets, weights)
-        gdf["id"] = str(initial_id) + "." + gdf["id"].astype(str)
+        gdf["id"] = str(initial_id) + "." + gdf["id"].astype(str).str.zfill(4)
         print(f"Partitioned polygon {initial_id} into {len(gdf)} pieces.")
 
         # Apply n_days transformation if needed
