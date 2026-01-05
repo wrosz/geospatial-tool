@@ -177,7 +177,7 @@ def cut_single_polygon(
         return [polygon_gdf]
     borders = polygon_gdf["geometry"].boundary
     borders = gpd.GeoDataFrame(geometry=borders, crs=metrical_crs)
-    intersections = find_valid_intersections(borders, streets)
+    intersections = find_valid_intersections(borders, streets, weights)
     if len(intersections) < 2:
         if depth == 0:
             print("Not enough intersections found, returning the original polygon")
