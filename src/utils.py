@@ -4,11 +4,13 @@ import polyline
 import warnings
 import pandas as pd
 from shapely.geometry import Polygon, LineString, MultiLineString, Point
-from shapely.ops import linemerge
+from shapely.ops import linemerge, unary_union
 import numpy as np
 from shapely.geometry import MultiPoint
 
-import src.logic_config as logic_config 
+import src.logic_config as cfg
+
+metrical_crs = cfg.metrical_crs
 
 
 def get_osrm_route(
@@ -52,8 +54,8 @@ def calculate_weight_by_buffer(
     line: gpd.GeoDataFrame,
     geoms_set: gpd.GeoDataFrame,
     weights: pd.DataFrame,
-    buffer: float = logic_config.buff,
-    non_relevant_len: float = logic_config.non_relevant_len,
+    buffer: float = cfg.street_buff,
+    non_relevant_len: float = cfg.non_relevant_len,
 ) -> float:
     """
     Calculates a weighted average of intersected geometry lengths along a buffered line.
@@ -71,8 +73,8 @@ def calculate_weight_by_buffer(
 
 
     # ensure line and geoms_set are in the correct CRS (metrical units)
-    line_metric = line.to_crs(logic_config.metrical_crs)
-    geoms_set_metric = geoms_set.to_crs(logic_config.metrical_crs)
+    line_metric = line.to_crs(metrical_crs)
+    geoms_set_metric = geoms_set.to_crs(metrical_crs)
 
     # ensure weights DataFrame has the required columns
     for colname in ["osm_key", "osm_value", "weight"]:
@@ -180,7 +182,7 @@ def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame, how:str, pts = None) ->
     if how not in ['angle', 'distance']:
         raise ValueError("Parameter 'how' must be either 'angle' or 'distance'.")
     
-    gdf_sorted = gdf.to_crs(logic_config.metrical_crs).copy()
+    gdf_sorted = gdf.to_crs(metrical_crs).copy()
     
     if how == 'distance':
         # Sort polygons by distance from the centroid
@@ -189,9 +191,9 @@ def sort_outer_polygons_spatially(gdf: gpd.GeoDataFrame, how:str, pts = None) ->
             pts_centroid = gdf_sorted.geometry.centroid
 
         else:
-            pts = pts.to_crs(logic_config.metrical_crs)
+            pts = pts.to_crs(metrical_crs)
             pts_inside = addresses_inside_polygon(gdf.union_all(), pts).copy()
-            pts_metr = pts_inside.to_crs(logic_config.metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
+            pts_metr = pts_inside.to_crs(metrical_crs) if pts_inside is not None else gdf_sorted.geometry.centroid
             pts_centroid = MultiPoint(pts_metr.geometry.tolist()).centroid if isinstance(pts_metr, gpd.GeoDataFrame) else pts_metr
 
         gdf_sorted = sort_by_distance_from_point(gdf_sorted, pts_centroid)
@@ -273,6 +275,7 @@ def shared_border(poly1, poly2):
     return border
 
 
+
 def extend_linestring(line, distance: float) -> LineString:
     if not isinstance(line, LineString) or len(line.coords) < 2:
         return line  # Return unchanged for non-LineStrings or degenerate lines
@@ -305,3 +308,102 @@ def extend_linestring(line, distance: float) -> LineString:
     coords = list(line.coords)
     new_coords = [tuple(new_start)] + coords[1:-1] + [tuple(new_end)]
     return LineString(new_coords)
+
+
+
+def clean_cut_pieces(pieces: list[gpd.GeoDataFrame], original_polygon: Polygon) -> list[gpd.GeoDataFrame]:
+    """
+    Cleans cut polygon pieces to remove artifacts while ensuring pieces fit together perfectly.
+    
+    Args:
+        pieces: List of GeoDataFrames, each containing one polygon piece
+        original_polygon: The original polygon that was cut
+    
+    Returns:
+        list[gpd.GeoDataFrame]: List of cleaned polygon pieces that fit together perfectly
+    """
+    if len(pieces) <= 1:
+        return pieces
+    
+    # Extract geometries and prepare for cleaning
+    geometries = [piece.geometry.iloc[0] for piece in pieces]
+    buff = cfg.polygon_buff
+    
+    # Step 1: Buffer inward then outward to remove thin artifacts
+    cleaned_geoms = [geom.buffer(-buff).buffer(buff) for geom in geometries]
+    
+    # Step 2: Calculate the area lost during cleaning
+    cleaned_union = unary_union(cleaned_geoms)
+    lost_area = original_polygon.difference(cleaned_union)
+    
+    # If no area was lost, we're done
+    if lost_area.is_empty or lost_area.area < 1e-6:
+        return [
+            gpd.GeoDataFrame(geometry=[geom], crs=metrical_crs, 
+                           data={'n_addresses': piece.get('n_addresses', [None]).iloc[0]})
+            for geom, piece in zip(cleaned_geoms, pieces)
+        ]
+    
+    # Step 3: Extract artifact polygons from lost area
+    if lost_area.geom_type == 'Polygon':
+        artifacts = [lost_area]
+    elif lost_area.geom_type in ['MultiPolygon', 'GeometryCollection']:
+        artifacts = [geom for geom in lost_area.geoms if isinstance(geom, Polygon)]
+    else:
+        artifacts = []
+    
+    # Step 4: Reattach each artifact to the piece with longest shared border
+    main_pieces = gpd.GeoDataFrame(geometry=cleaned_geoms, crs=metrical_crs)
+    
+    for artifact in artifacts:
+        if artifact.area < 1e-6:  # Skip tiny artifacts
+            continue
+            
+        # Find which piece shares the longest border with this artifact
+        max_border_length = 0
+        best_idx = 0
+        
+        for idx, piece_geom in enumerate(cleaned_geoms):
+            border = piece_geom.intersection(artifact.boundary)
+            if border.is_empty:
+                continue
+            border_length = border.length
+            if border_length > max_border_length:
+                max_border_length = border_length
+                best_idx = idx
+        
+        # Attach artifact to the best piece
+        if max_border_length > 0:
+            cleaned_geoms[best_idx] = unary_union([cleaned_geoms[best_idx], artifact])
+    
+    # Step 5: Ensure pieces don't overlap by subtracting previously processed pieces
+    final_geoms = []
+    for i, geom in enumerate(cleaned_geoms):
+        # Subtract all previously finalized pieces to avoid overlaps
+        for prev_geom in final_geoms:
+            geom = geom.difference(prev_geom)
+        
+        # Ensure result is a Polygon, not MultiPolygon or GeometryCollection
+        if geom.geom_type == 'GeometryCollection':
+            geom = unary_union([g for g in geom.geoms if isinstance(g, Polygon)])
+        if geom.geom_type == 'MultiPolygon':
+            # Take the largest polygon if split into multiple
+            geom = max(geom.geoms, key=lambda p: p.area)
+        
+        final_geoms.append(geom)
+    
+    # Step 6: Create final GeoDataFrames with preserved attributes
+    result = []
+    for geom, piece in zip(final_geoms, pieces):
+        n_addr = piece['n_addresses'].iloc[0] if 'n_addresses' in piece.columns else None
+        result.append(
+            gpd.GeoDataFrame(
+                geometry=[geom], 
+                crs=metrical_crs,
+                data={'n_addresses': [n_addr]},  # Wrap in list
+                index=[0]  # Explicit index
+            )
+        )
+        
+    return result
+

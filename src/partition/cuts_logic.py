@@ -4,10 +4,11 @@ import warnings
 from shapely.geometry import Polygon, MultiLineString, GeometryCollection
 from shapely.ops import linemerge, split
 
-from src.logic_config import metrical_crs, streets_extension_distance, default_top_weights_percentage, buff
 from src.partition.intersections_logic import find_valid_intersections
-from src.utils import (calculate_weight_by_buffer, addresses_inside_polygon, get_osrm_route,
-                       shared_border, sort_polygons_spatially, extend_linestring)
+import src.utils as utils
+import src.logic_config as cfg
+
+metrical_crs = cfg.metrical_crs
 
 
 def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -37,7 +38,7 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             p1_lon, p1_lat = p1.geometry.x, p1.geometry.y
             p2_lon, p2_lat = p2.geometry.x, p2.geometry.y
 
-            route_gdf = get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
+            route_gdf = utils.get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
             if route_gdf is not None:
                 routes.append(route_gdf)
 
@@ -72,7 +73,7 @@ def trim_routes(routes, polygons):
     ]
 
     # Create buffered boundary once
-    buffered_boundary = polygon_union.boundary.buffer(buff)
+    buffered_boundary = polygon_union.boundary.buffer(cfg.street_buff)
 
     # Spatially filter routes before overlay (optional but safe)
     intersects = clipped_routes.intersects(buffered_boundary)
@@ -109,12 +110,12 @@ def join_gdfs_longest_border(gdf1, gdf2):
     leftover = []
 
     for idx2, row2 in gdf2.iterrows():
-        neighbors_from_merged = merged_gdf[merged_gdf.apply(lambda x: shared_border(x.geometry, row2.geometry) is not None, axis=1)].copy()
+        neighbors_from_merged = merged_gdf[merged_gdf.apply(lambda x: utils.shared_border(x.geometry, row2.geometry) is not None, axis=1)].copy()
         if neighbors_from_merged.empty:
             warnings.warn(f"No shared border found for polygon {row2.name} in gdf2, will not merge.")
             leftover.append(idx2)
             continue
-        neighbors_from_merged["border_length"] = neighbors_from_merged.apply(lambda x: shared_border(x.geometry, row2.geometry).length, axis=1)
+        neighbors_from_merged["border_length"] = neighbors_from_merged.apply(lambda x: utils.shared_border(x.geometry, row2.geometry).length, axis=1)
 
         best_neighbor = neighbors_from_merged.loc[neighbors_from_merged["border_length"].idxmax()]
         merged_row = best_neighbor.geometry.union(row2.geometry)
@@ -132,7 +133,7 @@ def cut_single_polygon(
     addresses: gpd.GeoDataFrame,
     min_addresses: int,
     weights: pd.DataFrame,
-    top_weights_percentage: float = default_top_weights_percentage,
+    top_weights_percentage: float = cfg.default_top_weights_percentage,
     depth: int = 0
 ) -> list[gpd.GeoDataFrame]:
     """
@@ -164,7 +165,7 @@ def cut_single_polygon(
 
     # define an "n_addresses" column if it doesn't exist
     if "n_addresses" not in polygon_gdf.columns:    
-        polygon_gdf["n_addresses"] = len(addresses_inside_polygon(polygon_gdf.geometry.iloc[0], addresses))
+        polygon_gdf["n_addresses"] = len(utils.addresses_inside_polygon(polygon_gdf.geometry.iloc[0], addresses))
     if polygon_gdf["n_addresses"].iloc[0] < min_addresses:
         warnings.warn(
             f"Polygon has fewer addresses ({polygon_gdf['n_addresses'].iloc[0]}) than the minimum required ({min_addresses}), returning the original polygon"
@@ -193,9 +194,9 @@ def cut_single_polygon(
     polygon = polygon_gdf.geometry.iloc[0]
     for i, row in cuts.iterrows():
         line = row.geometry
-        result = split(polygon, extend_linestring(line, streets_extension_distance))
+        result = split(polygon, utils.extend_linestring(line, cfg.streets_extension_distance))
         cuts.at[i, "n_addresses"] = [
-            len(addresses_inside_polygon(poly, addresses)) for poly in result.geoms
+            len(utils.addresses_inside_polygon(poly, addresses)) for poly in result.geoms
         ]
         cuts.at[i, "result"] = result
         # If the cut results in more than two polygons, merge them based on shared borders
@@ -208,12 +209,12 @@ def cut_single_polygon(
             main_polys = gdf.nlargest(2, "n_addresses").copy()
             rest = gdf.drop(index=main_polys.index).copy()
             merged = join_gdfs_longest_border(main_polys, rest)[0]
-            cuts.at[i, "geometry"] = shared_border(
+            cuts.at[i, "geometry"] = utils.shared_border(
                 merged.geometry.iloc[0], merged.geometry.iloc[1]
             )
             cuts.at[i, "result"] = GeometryCollection(list(merged.geometry))
             cuts.at[i, "n_addresses"] = [
-                len(addresses_inside_polygon(poly, addresses)) for poly in merged.geometry
+                len(utils.addresses_inside_polygon(poly, addresses)) for poly in merged.geometry
             ]
 
     # Define a function to validate cuts based on address counts
@@ -232,7 +233,7 @@ def cut_single_polygon(
         return [polygon_gdf]
     
     cuts["weight"] = [
-        calculate_weight_by_buffer(
+        utils.calculate_weight_by_buffer(
             gpd.GeoDataFrame(geometry=[row.geometry], crs=metrical_crs),
             streets,
             weights,
@@ -263,6 +264,8 @@ def cut_single_polygon(
     best_result = pd.DataFrame(list(best_result.geoms))
     poly1 = best_result.iloc[0]
     poly2 = best_result.iloc[1]
+
+
     poly1 = gpd.GeoDataFrame(geometry=poly1, crs=metrical_crs)
     poly2 = gpd.GeoDataFrame(geometry=poly2, crs=metrical_crs)
 
@@ -277,7 +280,7 @@ def cut_single_polygon(
         cut_single_polygon(
             poly1,
             streets,
-            addresses_inside_polygon(poly1.geometry.iloc[0], addresses),
+            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,
@@ -288,14 +291,20 @@ def cut_single_polygon(
         cut_single_polygon(
             poly2,
             streets,
-            addresses_inside_polygon(poly2.geometry.iloc[0], addresses),
+            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,
             depth + 1
         )
     )
+
+    # remove small artifacts from the final pieces at the top level only
+    if depth == 0:
+        pieces = utils.clean_cut_pieces(pieces, polygon_gdf.geometry.iloc[0])
+
     return pieces
+
 
 def pieces_to_final_data(
     pieces: list[gpd.GeoDataFrame],
@@ -319,7 +328,7 @@ def pieces_to_final_data(
     gdf = pd.concat(pieces, ignore_index=True)
 
     # add ids based on spatial sorting
-    gdf = sort_polygons_spatially(gdf)
+    gdf = utils.sort_polygons_spatially(gdf)
     gdf = gdf.reset_index(drop=True)
     gdf["id"] = gdf.index
 
@@ -334,11 +343,11 @@ def pieces_to_final_data(
     def calculate_border_weight(id1: int, id2: int) -> float:
         poly1 = gdf.geometry.loc[id1]
         poly2 = gdf.geometry.loc[id2]
-        border = shared_border(poly1, poly2)  # returns a LineString or MultiLineString
+        border = utils.shared_border(poly1, poly2)  # returns a LineString or MultiLineString
 
         geom = list(border.geoms) if isinstance(border, MultiLineString) else [border]
         border = gpd.GeoDataFrame(geometry=geom, crs=metrical_crs)
-        return calculate_weight_by_buffer(border, streets, weights)
+        return utils.calculate_weight_by_buffer(border, streets, weights)
     
     gdf["weights"] = gdf.apply(
         lambda row: {neigh: calculate_border_weight(row.name, neigh) for neigh in row["neighbors"]},
@@ -358,7 +367,7 @@ def partition_polygons(
     min_addresses: int,
     weights: pd.DataFrame,
     id_column: str,
-    top_weights_percentage: float = default_top_weights_percentage,
+    top_weights_percentage: float = cfg.default_top_weights_percentage,
     n_days: int | None = None
 ):
     """
@@ -423,7 +432,7 @@ def partition_polygons(
         pieces = cut_single_polygon(
             gpd.GeoDataFrame(geometry=[polygon.geometry], crs=metrical_crs),
             streets,
-            addresses_inside_polygon(polygon.geometry, addresses),
+            utils.addresses_inside_polygon(polygon.geometry, addresses),
             min_addresses,
             weights,
             top_weights_percentage
