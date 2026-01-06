@@ -1,11 +1,11 @@
 import geopandas as gpd
 import pandas as pd
 import warnings
-from shapely.geometry import Polygon, MultiLineString, GeometryCollection
+from shapely.geometry import Polygon, GeometryCollection
 from shapely.ops import linemerge, split
 
 import src.partition.intersections_logic as inters_logic
-import src.partition.weight_between_neighbors as neighbors
+import src.partition.partition_utils as partition_utils
 import src.utils as utils
 import src.logic_config as cfg
 
@@ -268,7 +268,7 @@ def cut_single_polygon(
     poly2_geom = list(best_result.geoms)[1]
     
     # CLEAN ARTIFACTS IMMEDIATELY AFTER CUT
-    poly1_geom, poly2_geom = utils.clean_two_pieces_after_cut(
+    poly1_geom, poly2_geom = partition_utils.clean_two_pieces_after_cut(
         poly1_geom,
         poly2_geom
     )
@@ -349,9 +349,9 @@ def pieces_to_final_data(
     gdf["id"] = gdf.index
 
     # add neighbors based on touching geometries
-    gdf = neighbors.find_neighbors(gdf)
+    gdf = partition_utils.find_neighbors(gdf)
     # add border weights between neighbors
-    gdf = neighbors.calculate_border_weights(gdf, streets, weights)
+    gdf = partition_utils.calculate_border_weights(gdf, streets, weights)
 
     # reorder columns
     gdf = gdf[["id", "n_addresses", "geometry", "neighbors", "border_weights"]]
