@@ -262,26 +262,45 @@ def cut_single_polygon(
     ]
     best_cut = cuts.loc[cuts["n_addresses_diff"].idxmin()]
     best_result = best_cut.result
-    best_result = pd.DataFrame(list(best_result.geoms))
-    poly1 = best_result.iloc[0]
-    poly2 = best_result.iloc[1]
-
-
-    poly1 = gpd.GeoDataFrame(geometry=poly1, crs=metrical_crs)
-    poly2 = gpd.GeoDataFrame(geometry=poly2, crs=metrical_crs)
-
-    # Assign the number of addresses to each polygon
-    poly1["n_addresses"] = best_cut.n_addresses[0]
-    poly2["n_addresses"] = best_cut.n_addresses[1]
-
-    print(f"Cutting polygon at depth {depth}: {poly1['n_addresses'].iloc[0]} addresses in first piece, {poly2['n_addresses'].iloc[0]} in second piece")
-
+    
+    # Extract the two polygon pieces
+    poly1_geom = list(best_result.geoms)[0]
+    poly2_geom = list(best_result.geoms)[1]
+    
+    # CLEAN ARTIFACTS IMMEDIATELY AFTER CUT
+    poly1_geom, poly2_geom = utils.clean_two_pieces_after_cut(
+        poly1_geom,
+        poly2_geom
+    )
+    
+    # Recalculate n_addresses after cleaning
+    addresses_metric = addresses.to_crs(metrical_crs)
+    n_addr_1 = len(utils.addresses_inside_polygon(poly1_geom, addresses_metric))
+    n_addr_2 = len(utils.addresses_inside_polygon(poly2_geom, addresses_metric))
+    
+    # Create GeoDataFrames for each piece
+    poly1 = gpd.GeoDataFrame(
+        geometry=[poly1_geom], 
+        crs=metrical_crs,
+        data={'n_addresses': [n_addr_1]},
+        index=[0]
+    )
+    poly2 = gpd.GeoDataFrame(
+        geometry=[poly2_geom], 
+        crs=metrical_crs,
+        data={'n_addresses': [n_addr_2]},
+        index=[0]
+    )
+    
+    print(f"Cutting polygon at depth {depth}: {n_addr_1} addresses in first piece, {n_addr_2} in second piece")
+    
+    # Recursively cut each piece (they're already clean!)
     pieces: list[gpd.GeoDataFrame] = []
     pieces.extend(
         cut_single_polygon(
             poly1,
             streets,
-            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses),
+            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses_metric),
             min_addresses,
             weights,
             top_weights_percentage,
@@ -292,18 +311,14 @@ def cut_single_polygon(
         cut_single_polygon(
             poly2,
             streets,
-            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses),
+            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses_metric),
             min_addresses,
             weights,
             top_weights_percentage,
             depth + 1
         )
     )
-
-    # remove small artifacts from the final pieces at the top level only
-    if depth == 0:
-        pieces = utils.clean_cut_pieces(pieces, polygon_gdf.geometry.iloc[0])
-
+    
     return pieces
 
 

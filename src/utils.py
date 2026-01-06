@@ -311,13 +311,18 @@ def extend_linestring(line, distance: float) -> LineString:
 
 
 
-def clean_cut_pieces(pieces: list[gpd.GeoDataFrame], original_polygon: Polygon) -> list[gpd.GeoDataFrame]:
+def clean_cut_pieces(
+    pieces: list[gpd.GeoDataFrame], 
+    original_polygon: Polygon,
+    addresses: gpd.GeoDataFrame
+) -> list[gpd.GeoDataFrame]:
     """
     Cleans cut polygon pieces to remove artifacts while ensuring pieces fit together perfectly.
     
     Args:
         pieces: List of GeoDataFrames, each containing one polygon piece
         original_polygon: The original polygon that was cut
+        addresses: GeoDataFrame of address points for recalculating counts
     
     Returns:
         list[gpd.GeoDataFrame]: List of cleaned polygon pieces that fit together perfectly
@@ -330,53 +335,111 @@ def clean_cut_pieces(pieces: list[gpd.GeoDataFrame], original_polygon: Polygon) 
     buff = cfg.polygon_buff
     
     # Step 1: Buffer inward then outward to remove thin artifacts
-    cleaned_geoms = [geom.buffer(-buff).buffer(buff) for geom in geometries]
+    # Handle pieces that become empty or disconnected after buffering
+    cleaned_geoms = []
+    artifacts_from_buffering = []
+    
+    for i, geom in enumerate(geometries):
+        # Try buffering with original buffer size
+        buffered = geom.buffer(-buff).buffer(buff)
+        
+        # Ensure geometry is valid
+        if not buffered.is_valid:
+            buffered = buffered.buffer(0)
+        
+        # Check if buffering resulted in empty geometry
+        if buffered.is_empty:
+            # Try with smaller buffer (50% of original)
+            smaller_buff = buff * 0.5
+            buffered = geom.buffer(-smaller_buff).buffer(smaller_buff)
+            if not buffered.is_valid:
+                buffered = buffered.buffer(0)
+            
+            # If still empty, use original geometry
+            if buffered.is_empty:
+                warnings.warn(f"Piece {i} became empty after buffering, using original geometry")
+                buffered = geom
+        
+        # Handle MultiPolygon result (disconnected pieces)
+        if buffered.geom_type == 'MultiPolygon':
+            # Keep the largest polygon as the main piece
+            polys_by_area = sorted(buffered.geoms, key=lambda p: p.area, reverse=True)
+            main_poly = polys_by_area[0]
+            # Treat smaller disconnected pieces as artifacts
+            for small_poly in polys_by_area[1:]:
+                artifacts_from_buffering.append(small_poly)
+            buffered = main_poly
+        elif buffered.geom_type == 'GeometryCollection':
+            # Extract polygons and keep the largest
+            polys = [g for g in buffered.geoms if isinstance(g, Polygon)]
+            if polys:
+                polys_by_area = sorted(polys, key=lambda p: p.area, reverse=True)
+                main_poly = polys_by_area[0]
+                for small_poly in polys_by_area[1:]:
+                    artifacts_from_buffering.append(small_poly)
+                buffered = main_poly
+            else:
+                warnings.warn(f"Piece {i} has no polygons after buffering, using original geometry")
+                buffered = geom
+        
+        cleaned_geoms.append(buffered)
     
     # Step 2: Calculate the area lost during cleaning
     cleaned_union = unary_union(cleaned_geoms)
     lost_area = original_polygon.difference(cleaned_union)
     
-    # If no area was lost, we're done
-    if lost_area.is_empty or lost_area.area < 1e-6:
-        return [
-            gpd.GeoDataFrame(geometry=[geom], crs=metrical_crs, 
-                           data={'n_addresses': piece.get('n_addresses', [None]).iloc[0]})
-            for geom, piece in zip(cleaned_geoms, pieces)
-        ]
+    # Combine artifacts from buffering and lost area
+    all_artifacts = artifacts_from_buffering.copy()
     
-    # Step 3: Extract artifact polygons from lost area
-    if lost_area.geom_type == 'Polygon':
-        artifacts = [lost_area]
-    elif lost_area.geom_type in ['MultiPolygon', 'GeometryCollection']:
-        artifacts = [geom for geom in lost_area.geoms if isinstance(geom, Polygon)]
-    else:
-        artifacts = []
+    if not lost_area.is_empty and lost_area.area >= 1e-6:
+        # Extract artifact polygons from lost area
+        if lost_area.geom_type == 'Polygon':
+            all_artifacts.append(lost_area)
+        elif lost_area.geom_type in ['MultiPolygon', 'GeometryCollection']:
+            all_artifacts.extend([geom for geom in lost_area.geoms if isinstance(geom, Polygon)])
     
-    # Step 4: Reattach each artifact to the piece with longest shared border
-    main_pieces = gpd.GeoDataFrame(geometry=cleaned_geoms, crs=metrical_crs)
-    
-    for artifact in artifacts:
-        if artifact.area < 1e-6:  # Skip tiny artifacts
-            continue
-            
-        # Find which piece shares the longest border with this artifact
-        max_border_length = 0
-        best_idx = 0
-        
-        for idx, piece_geom in enumerate(cleaned_geoms):
-            border = piece_geom.intersection(artifact.boundary)
-            if border.is_empty:
+    # Step 3: Reattach each artifact to the piece with longest shared border
+    if all_artifacts:
+        for artifact in all_artifacts:
+            if artifact.area < 1e-6:  # Skip tiny artifacts
                 continue
-            border_length = border.length
-            if border_length > max_border_length:
-                max_border_length = border_length
-                best_idx = idx
-        
-        # Attach artifact to the best piece
-        if max_border_length > 0:
-            cleaned_geoms[best_idx] = unary_union([cleaned_geoms[best_idx], artifact])
+                
+            # Find which piece shares the longest border with this artifact
+            max_border_length = 0
+            best_idx = 0
+            
+            for idx, piece_geom in enumerate(cleaned_geoms):
+                # Check both boundary intersection and physical intersection
+                border = piece_geom.intersection(artifact.boundary)
+                if border.is_empty:
+                    # Also check if they physically touch/overlap
+                    intersection = piece_geom.intersection(artifact)
+                    if not intersection.is_empty:
+                        border = intersection.boundary if hasattr(intersection, 'boundary') else intersection
+                
+                if border.is_empty:
+                    continue
+                    
+                border_length = border.length if hasattr(border, 'length') else 0
+                if border_length > max_border_length:
+                    max_border_length = border_length
+                    best_idx = idx
+            
+            # Attach artifact to the best piece
+            if max_border_length > 0:
+                cleaned_geoms[best_idx] = unary_union([cleaned_geoms[best_idx], artifact])
+            else:
+                # If no shared border found, attach to nearest piece
+                min_distance = float('inf')
+                nearest_idx = 0
+                for idx, piece_geom in enumerate(cleaned_geoms):
+                    dist = piece_geom.distance(artifact)
+                    if dist < min_distance:
+                        min_distance = dist
+                        nearest_idx = idx
+                cleaned_geoms[nearest_idx] = unary_union([cleaned_geoms[nearest_idx], artifact])
     
-    # Step 5: Ensure pieces don't overlap by subtracting previously processed pieces
+    # Step 4: Ensure pieces don't overlap by subtracting previously processed pieces
     final_geoms = []
     for i, geom in enumerate(cleaned_geoms):
         # Subtract all previously finalized pieces to avoid overlaps
@@ -392,18 +455,103 @@ def clean_cut_pieces(pieces: list[gpd.GeoDataFrame], original_polygon: Polygon) 
         
         final_geoms.append(geom)
     
-    # Step 6: Create final GeoDataFrames with preserved attributes
+    # Step 5: Create final GeoDataFrames and recalculate n_addresses
     result = []
-    for geom, piece in zip(final_geoms, pieces):
-        n_addr = piece['n_addresses'].iloc[0] if 'n_addresses' in piece.columns else None
+    addresses_metric = addresses.to_crs(metrical_crs)
+    
+    for geom in final_geoms:
+        # Recalculate n_addresses for cleaned geometry
+        n_addr = len(addresses_inside_polygon(geom, addresses_metric))
+        
         result.append(
             gpd.GeoDataFrame(
                 geometry=[geom], 
                 crs=metrical_crs,
-                data={'n_addresses': [n_addr]},  # Wrap in list
-                index=[0]  # Explicit index
+                data={'n_addresses': [n_addr]},
+                index=[0]
             )
         )
         
     return result
+
+
+def clean_two_pieces_after_cut(
+    poly1_geom: Polygon,
+    poly2_geom: Polygon,
+) -> tuple[Polygon, Polygon]:
+    """
+    Cleans artifacts from two polygons immediately after cutting.
+    
+    Args:
+        poly1_geom: First polygon piece
+        poly2_geom: Second polygon piece
+        min_artifact_width: Minimum width threshold for artifacts
+    
+    Returns:
+        Tuple of cleaned polygons that fit together perfectly
+    """
+    from shapely.ops import unary_union
+    
+    # Original union for validation
+    original_union = unary_union([poly1_geom, poly2_geom])
+    
+    # Light buffering to identify thin artifacts
+    buff = cfg.min_artifact_width / 2
+    
+    clean1 = poly1_geom.buffer(-buff).buffer(buff)
+    clean2 = poly2_geom.buffer(-buff).buffer(buff)
+    
+    # Handle empty geometries
+    if clean1.is_empty:
+        clean1 = poly1_geom
+    if clean2.is_empty:
+        clean2 = poly2_geom
+    
+    # Handle disconnected pieces from buffering
+    if clean1.geom_type == 'MultiPolygon':
+        clean1 = max(clean1.geoms, key=lambda p: p.area)
+    if clean2.geom_type == 'MultiPolygon':
+        clean2 = max(clean2.geoms, key=lambda p: p.area)
+    
+    # Find lost area (artifacts)
+    cleaned_union = unary_union([clean1, clean2])
+    lost_area = original_union.difference(cleaned_union)
+    
+    if lost_area.is_empty or lost_area.area < 1e-6:
+        return clean1, clean2
+    
+    # Extract artifact polygons
+    artifacts = []
+    if lost_area.geom_type == 'Polygon':
+        artifacts = [lost_area]
+    elif lost_area.geom_type in ['MultiPolygon', 'GeometryCollection']:
+        artifacts = [g for g in lost_area.geoms if isinstance(g, Polygon) and g.area >= 1e-6]
+    
+    # Reattach artifacts based on longest shared border
+    for artifact in artifacts:
+        # Check border with both pieces
+        border1 = clean1.intersection(artifact.boundary)
+        border2 = clean2.intersection(artifact.boundary)
+        
+        border1_length = border1.length if not border1.is_empty else 0
+        border2_length = border2.length if not border2.is_empty else 0
+        
+        # Attach to piece with longer shared border
+        if border1_length >= border2_length:
+            clean1 = unary_union([clean1, artifact])
+        else:
+            clean2 = unary_union([clean2, artifact])
+    
+    # Ensure no overlap
+    clean2 = clean2.difference(clean1)
+    
+    # Handle geometry type issues
+    if clean1.geom_type == 'MultiPolygon':
+        clean1 = max(clean1.geoms, key=lambda p: p.area)
+    if clean2.geom_type == 'MultiPolygon':
+        clean2 = max(clean2.geoms, key=lambda p: p.area)
+    
+    return clean1, clean2
+
+
 

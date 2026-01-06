@@ -12,4 +12,4 @@ max_number_of_intersections = 40  # maximum number of intersections to process (
 default_top_weights_percentage = 0.2  # percentage of top weights to consider for partitioning
 
 # cleaning polygons parameters
-polygon_buff = 20 # buffer in meters for cleaning polygons
+min_artifact_width = 30  # buffer in meters for cleaning polygons
