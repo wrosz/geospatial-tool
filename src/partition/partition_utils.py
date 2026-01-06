@@ -8,7 +8,6 @@ import src.utils as utils
 
 metrical_crs = cfg.metrical_crs
 
-
 def find_neighbors(
     gdf: gpd.GeoDataFrame,
 ) -> gpd.GeoDataFrame:
@@ -190,3 +189,82 @@ def calculate_border_weights(
     gdf = gdf.drop(columns=["geom_buffered"])
     
     return gdf
+
+
+def clean_two_pieces_after_cut(
+    poly1_geom: Polygon,
+    poly2_geom: Polygon,
+) -> tuple[Polygon, Polygon]:
+    """
+    Cleans artifacts from two polygons immediately after cutting.
+    
+    Args:
+        poly1_geom: First polygon piece
+        poly2_geom: Second polygon piece
+        min_artifact_width: Minimum width threshold for artifacts
+    
+    Returns:
+        Tuple of cleaned polygons that fit together perfectly
+    """
+    from shapely.ops import unary_union
+    
+    # Original union for validation
+    original_union = unary_union([poly1_geom, poly2_geom])
+    
+    # Light buffering to identify thin artifacts
+    buff = cfg.min_artifact_width / 2
+    
+    clean1 = poly1_geom.buffer(-buff).buffer(buff)
+    clean2 = poly2_geom.buffer(-buff).buffer(buff)
+    
+    # Handle empty geometries
+    if clean1.is_empty:
+        clean1 = poly1_geom
+    if clean2.is_empty:
+        clean2 = poly2_geom
+    
+    # Handle disconnected pieces from buffering
+    if clean1.geom_type == 'MultiPolygon':
+        clean1 = max(clean1.geoms, key=lambda p: p.area)
+    if clean2.geom_type == 'MultiPolygon':
+        clean2 = max(clean2.geoms, key=lambda p: p.area)
+    
+    # Find lost area (artifacts)
+    cleaned_union = unary_union([clean1, clean2])
+    lost_area = original_union.difference(cleaned_union)
+    
+    if lost_area.is_empty or lost_area.area < 1e-6:
+        return clean1, clean2
+    
+    # Extract artifact polygons
+    artifacts = []
+    if lost_area.geom_type == 'Polygon':
+        artifacts = [lost_area]
+    elif lost_area.geom_type in ['MultiPolygon', 'GeometryCollection']:
+        artifacts = [g for g in lost_area.geoms if isinstance(g, Polygon) and g.area >= 1e-6]
+    
+    # Reattach artifacts based on longest shared border
+    for artifact in artifacts:
+        # Check border with both pieces
+        border1 = clean1.intersection(artifact.boundary)
+        border2 = clean2.intersection(artifact.boundary)
+        
+        border1_length = border1.length if not border1.is_empty else 0
+        border2_length = border2.length if not border2.is_empty else 0
+        
+        # Attach to piece with longer shared border
+        if border1_length >= border2_length:
+            clean1 = unary_union([clean1, artifact])
+        else:
+            clean2 = unary_union([clean2, artifact])
+    
+    # Ensure no overlap
+    clean2 = clean2.difference(clean1)
+    
+    # Handle geometry type issues
+    if clean1.geom_type == 'MultiPolygon':
+        clean1 = max(clean1.geoms, key=lambda p: p.area)
+    if clean2.geom_type == 'MultiPolygon':
+        clean2 = max(clean2.geoms, key=lambda p: p.area)
+    
+    return clean1, clean2
