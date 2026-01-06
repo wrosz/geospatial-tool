@@ -4,7 +4,8 @@ import warnings
 from shapely.geometry import Polygon, MultiLineString, GeometryCollection
 from shapely.ops import linemerge, split
 
-from src.partition.intersections_logic import find_valid_intersections
+import src.partition.intersections_logic as inters_logic
+import src.partition.weight_between_neighbors as neighbors
 import src.utils as utils
 import src.logic_config as cfg
 
@@ -178,7 +179,7 @@ def cut_single_polygon(
         return [polygon_gdf]
     borders = polygon_gdf["geometry"].boundary
     borders = gpd.GeoDataFrame(geometry=borders, crs=metrical_crs)
-    intersections = find_valid_intersections(borders, streets, weights)
+    intersections = inters_logic.find_valid_intersections(borders, streets, weights)
     if len(intersections) < 2:
         if depth == 0:
             print("Not enough intersections found, returning the original polygon")
@@ -333,26 +334,12 @@ def pieces_to_final_data(
     gdf["id"] = gdf.index
 
     # add neighbors based on touching geometries
-    neighbors = gpd.sjoin(gdf, gdf, how="left", predicate="touches")
-    gdf["neighbors"] = neighbors.groupby(neighbors.index)["id_right"].apply(list)
-    gdf["neighbors"] = gdf["neighbors"].apply(
-        lambda x: sorted([int(i) for i in x if not pd.isna(i)]) if isinstance(x, list) else []
-    )
+    gdf = neighbors.find_neighbors(gdf)
+    # add border weights between neighbors
+    gdf = neighbors.calculate_border_weights(gdf, streets, weights)
 
-    # add a dictionary of border weights
-    def calculate_border_weight(id1: int, id2: int) -> float:
-        poly1 = gdf.geometry.loc[id1]
-        poly2 = gdf.geometry.loc[id2]
-        border = utils.shared_border(poly1, poly2)  # returns a LineString or MultiLineString
-
-        geom = list(border.geoms) if isinstance(border, MultiLineString) else [border]
-        border = gpd.GeoDataFrame(geometry=geom, crs=metrical_crs)
-        return utils.calculate_weight_by_buffer(border, streets, weights)
-    
-    gdf["weights"] = gdf.apply(
-        lambda row: {neigh: calculate_border_weight(row.name, neigh) for neigh in row["neighbors"]},
-        axis=1,
-    )
+    # reorder columns
+    gdf = gdf[["id", "n_addresses", "geometry", "neighbors", "border_weights"]]
 
     return gdf
 

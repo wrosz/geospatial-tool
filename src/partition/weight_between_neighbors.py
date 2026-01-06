@@ -10,22 +10,35 @@ metrical_crs = cfg.metrical_crs
 
 
 def find_neighbors(
-    pieces: list[gpd.GeoDataFrame],
-    streets: gpd.GeoDataFrame,
-    weights: pd.DataFrame,
+    gdf: gpd.GeoDataFrame,
 ) -> gpd.GeoDataFrame:
+    """
+    Identifies neighboring polygons based on intersection of buffered geometries.
     
-    # turn pieces into a single GeoDataFrame
-    gdf = pd.concat(pieces, ignore_index=True)
+    This function determines which polygons are neighbors by buffering each polygon
+    and checking for intersections. The buffering accounts for precision issues and
+    ensures polygons separated by narrow streets are still recognized as neighbors.
+    
+    Args:
+        gdf: GeoDataFrame with polygons in metrical CRS, must have 'id' column
+    
+    Returns:
+        GeoDataFrame with added columns:
+            - geom_buffered: Buffered polygon geometries for neighbor detection
+            - neighbors: List of neighbor polygon IDs for each polygon
+    
+    Note:
+        Input GeoDataFrame must already be in metrical CRS and have an 'id' column.
+        The buffered geometries are retained for reuse by calculate_border_weights().
+    """
 
-    # add ids based on spatial sorting
-    gdf = utils.sort_polygons_spatially(gdf)
-    gdf = gdf.reset_index(drop=True)
-    gdf["id"] = gdf.index
-
-    # Ensure correct CRS
+    # ensure gdf is in correct CRS
     gdf = gdf.to_crs(metrical_crs)
-
+    
+    # Validate input
+    if "id" not in gdf.columns:
+        raise ValueError("GeoDataFrame must have 'id' column")
+    
     # buffer geometries for neighbor detection
     gdf["geom_buffered"] = gdf.geometry.buffer(cfg.street_buff)
 
@@ -65,7 +78,7 @@ def calculate_border_weights(
         non_relevant_len: Minimum intersection length to consider relevant
     
     Returns:
-        GeoDataFrame with added 'border_weights' column (dict of neighbor_id: weight)
+        GeoDataFrame with added 'border_weights' column (dict of neighbor_id: weight) and without 'geom_buffered' column.
     """
     # Ensure streets are in correct CRS
     streets = streets.to_crs(metrical_crs)
@@ -75,9 +88,11 @@ def calculate_border_weights(
         if colname not in weights.columns:
             raise ValueError(f"DataFrame 'weights' missing column: {colname}")
     
-    # Validate that geom_buffered exists
+    # Validate that required columns exist
     if "geom_buffered" not in gdf.columns:
         raise ValueError("GeoDataFrame must have 'geom_buffered' column. Run find_neighbors() first.")
+    if "neighbors" not in gdf.columns:
+        raise ValueError("GeoDataFrame must have 'neighbors' column. Run find_neighbors() first.")
     
     # Initialize border_weights column
     gdf["border_weights"] = [{} for _ in range(len(gdf))]
@@ -170,5 +185,8 @@ def calculate_border_weights(
                 border_weights_dict[neighbor_id] = float(weighted_sum / total_length)
         
         gdf.at[idx, "border_weights"] = border_weights_dict
+
+    # Clean up temporary buffered geometry column
+    gdf = gdf.drop(columns=["geom_buffered"])
     
     return gdf
