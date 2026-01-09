@@ -47,7 +47,7 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         routes_gdf = pd.concat(routes).reset_index(drop=True)
         return routes_gdf
     else:
-        return gpd.GeoDataFrame(columns=["geometry", "duration"], crs="EPSG:4326")
+        return gpd.GeoDataFrame(columns=["geometry", "duration", "weight"], crs="EPSG:4326")
     
 
 
@@ -186,8 +186,9 @@ def cut_single_polygon(
         return [polygon_gdf]
     
     # Find all routes between intersections
-    cuts = find_all_routes(intersections).to_crs(metrical_crs)[["geometry"]]
+    cuts = find_all_routes(intersections).to_crs(metrical_crs).loc[:, ["geometry", "weight"]]
     cuts = trim_routes(cuts, polygon_gdf)
+
 
     # add a column for a list of addresses inside each component a cut creates
     cuts["n_addresses"] = [None for _ in cuts.iterrows()]
@@ -232,15 +233,6 @@ def cut_single_polygon(
         if depth == 0:
             print("No valid cuts found, returning the original polygon")
         return [polygon_gdf]
-    
-    cuts["weight"] = [
-        utils.calculate_weight_by_buffer(
-            gpd.GeoDataFrame(geometry=[row.geometry], crs=metrical_crs),
-            streets,
-            weights,
-        )
-        for _, row in cuts.iterrows()
-    ]
 
     # Select top cuts based on weight
     cuts = cuts[cuts["weight"] >= cuts["weight"].quantile(1 - top_weights_percentage)]

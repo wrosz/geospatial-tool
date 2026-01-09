@@ -1,0 +1,99 @@
+-- Custom OSRM profile generated from CSV
+-- All specified OSM keys are routable
+-- Specific types get custom weights from CSV, others get default weight
+
+api_version = 4
+
+function setup()
+  return {
+    properties = {
+      weight_name = 'preference',
+      max_speed_for_map_matching = 40,
+      weight_precision = 1,
+      continue_straight_at_waypoint = true,
+      use_turn_restrictions = false
+    }
+  }
+end
+
+function process_node(profile, node, result, relations)
+  -- No barrier processing needed
+end
+
+function process_way(profile, way, result, relations)
+  local highway = way:get_value_by_key('highway')
+  local railway = way:get_value_by_key('railway')
+  local waterway = way:get_value_by_key('waterway')
+
+  local rate = 0
+
+  -- Check if way has any routable feature
+  local is_routable = (highway and highway ~= '') or 
+                      (railway and railway ~= '') or 
+                      (waterway and waterway ~= '')
+
+  if not is_routable then
+    return  -- Not a routable feature - skip it
+  end
+
+  -- Default rate for anything not specified
+  rate = 1
+
+  -- Apply specific rates for highway
+  if highway == 'motorway' then
+    rate = 9
+  elseif highway == 'trunk' then
+    rate = 9
+  elseif highway == 'primary' then
+    rate = 6
+  elseif highway == 'secondary' then
+    rate = 5
+  elseif highway == 'tertiary' then
+    rate = 4
+  elseif highway == 'unclassified' then
+    rate = 3
+  elseif highway == 'residential' then
+    rate = 2
+  elseif highway == 'living' then
+    rate = 1
+  end
+
+  -- Apply specific rates for railway
+  if railway == 'rail' then
+    rate = 9
+  elseif railway == 'disused' then
+    rate = 6
+  end
+
+  -- Apply specific rates for waterway
+  if waterway == 'river' then
+    rate = 10
+  elseif waterway == 'stream' then
+    rate = 7
+  elseif waterway == 'canal' then
+    rate = 7
+  elseif waterway == 'drain' then
+    rate = 2
+  end
+
+  -- Make the way routable with the assigned rate
+  result.forward_mode = mode.driving
+  result.backward_mode = mode.driving
+  result.forward_speed = 1
+  result.backward_speed = 1
+  result.forward_rate = rate
+  result.backward_rate = rate
+end
+
+function process_turn(profile, turn)
+  -- No turn penalties
+  turn.duration = 0
+  turn.weight = 0
+end
+
+return {
+  setup = setup,
+  process_way = process_way,
+  process_node = process_node,
+  process_turn = process_turn
+}

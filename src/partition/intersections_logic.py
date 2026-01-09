@@ -82,7 +82,7 @@ def find_intersections_with_angle_and_weight(
         return 360 - diff if diff > 180 else diff
     
     def calculate_street_weight(street: gpd.GeoSeries, weights: pd.DataFrame) -> float:
-        """Calculates the weight of a street based on its attributes and a weights DataFrame.
+        """Calculates the weight of a single street based on its attributes and a weights DataFrame.
         
         Args:
             street (GeoSeries): A GeoSeries representing a street with its attributes.
@@ -178,42 +178,53 @@ def remove_small_angles(intersections: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 def remove_close_points(points: gpd.GeoDataFrame, threshold: float) -> gpd.GeoDataFrame:
-    """
-    Removes points that are closer to each other than a given threshold, using spatial indexing.
-
-    Automatically reprojects to `config.metrical_crs` if necessary for distance calculations.
-
+    '''Removes points closer than threshold, keeping the heaviest point in each cluster.
+    
+    After identifying the heaviest point in a cluster, re-centers on it and rejects all
+    nearby points to ensure complete cluster resolution. Automatically reprojects to 
+    metrical_crs for distance calculations.
+    
     Args:
-        points (GeoDataFrame): Input points to filter.
-        threshold (float): Minimum distance allowed between any two points (in meters).
-
+        points: Input points with 'weight' column and Point geometries.
+        threshold: Minimum distance between points in meters.
+    
     Returns:
-        GeoDataFrame: Filtered set of points.
-    """
+        Filtered points where no two points are closer than threshold.
+        
+    '''    
+    
     if points.crs != metrical_crs:
         points = points.to_crs(metrical_crs)
-
+    
     geometries = points.geometry
     sindex = geometries.sindex
-
-    kept = []
+    kept_set = set()
     rejected = set()
-
+    
     for i, geom in enumerate(geometries):
-        if i in rejected:
+        if i in rejected or i in kept_set:
             continue
-
-        kept.append(i)
-
-        # Find candidates within the buffer zone
-        candidate_idxs = sindex.query(geom.buffer(threshold))
-        for j in candidate_idxs:
-            if j == i or j in rejected:
-                continue
-            if geom.distance(geometries.iloc[j]) < threshold:
-                rejected.add(j)
-
-    return points.iloc[kept].copy()
+        
+        # Find initial cluster around point i
+        candidate_idxs = list(sindex.query(geom.buffer(threshold)))
+        close_points = [j for j in candidate_idxs 
+                       if j not in rejected and j not in kept_set 
+                       and geom.distance(geometries.iloc[j]) < threshold]
+        
+        # Find the heaviest in this cluster
+        heaviest = max(close_points, key=lambda idx: points.weight.iloc[idx])
+        kept_set.add(heaviest)
+        
+        # NOW: Re-center on the heaviest and reject everything around IT
+        heaviest_geom = geometries.iloc[heaviest]
+        recentered_candidates = list(sindex.query(heaviest_geom.buffer(threshold)))
+        
+        for j in recentered_candidates:
+            if j != heaviest and j not in kept_set:
+                if heaviest_geom.distance(geometries.iloc[j]) < threshold:
+                    rejected.add(j)
+    
+    return points.iloc[list(kept_set)].copy()
 
 
 

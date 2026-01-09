@@ -27,23 +27,23 @@ def get_osrm_route(
         lat2 (float): Latitude of the end point.
 
     Returns:
-        gpd.GeoDataFrame | None: GeoDataFrame with the route LineString and duration, or None if OSRM fails.
+        gpd.GeoDataFrame | None: GeoDataFrame with the route LineString, duration and normalized weight, or None if OSRM fails.
         (in crs EPSG:4326)
     """
     url = (
         f"http://localhost:5000/route/v1/driving/"
-        f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline&annotations=true"
+        f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
     )
     response = requests.get(url)
     data = response.json()
 
     if data["code"] == "Ok":
         geom = data["routes"][0]["geometry"]
-        duration = data["routes"][0]["duration"]
         coords_latlon = polyline.decode(geom)
         coords_lonlat = [(lon, lat) for lat, lon in coords_latlon]
         gdf = gpd.GeoDataFrame(geometry=[LineString(coords_lonlat)], crs="EPSG:4326")
-        gdf["duration"] = duration
+        gdf["duration"] = data["routes"][0]["duration"]
+        gdf["weight"] = data["routes"][0]["weight"] / data["routes"][0]["distance"]
         return gdf
     else:
         print("OSRM Error:", data)

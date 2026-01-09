@@ -1,0 +1,15 @@
+osm_key,osm_value,weight
+highway,motorway,9
+highway,trunk,9
+highway,primary,6
+highway,secondary,5
+highway,tertiary,4
+highway,unclassified,3
+highway,residential,2
+highway,living,1
+waterway,river,10
+waterway,stream,7
+waterway,canal,7
+waterway,drain,2
+railway,rail,9
+railway,disused,6
