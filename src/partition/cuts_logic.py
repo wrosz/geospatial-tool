@@ -39,7 +39,7 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             p1_lon, p1_lat = p1.geometry.x, p1.geometry.y
             p2_lon, p2_lat = p2.geometry.x, p2.geometry.y
 
-            route_gdf = utils.get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
+            route_gdf = utils.get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat, alternatives=cfg.number_of_alternatives)
             if route_gdf is not None:
                 routes.append(route_gdf)
 
@@ -265,10 +265,8 @@ def cut_single_polygon(
         poly2_geom
     )
     
-    # Recalculate n_addresses after cleaning
-    addresses_metric = addresses.to_crs(metrical_crs)
-    n_addr_1 = len(utils.addresses_inside_polygon(poly1_geom, addresses_metric))
-    n_addr_2 = len(utils.addresses_inside_polygon(poly2_geom, addresses_metric))
+    n_addr_1 = len(utils.addresses_inside_polygon(poly1_geom, addresses))
+    n_addr_2 = len(utils.addresses_inside_polygon(poly2_geom, addresses))
     
     # Create GeoDataFrames for each piece
     poly1 = gpd.GeoDataFrame(
@@ -292,7 +290,7 @@ def cut_single_polygon(
         cut_single_polygon(
             poly1,
             streets,
-            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses_metric),
+            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,
@@ -303,7 +301,7 @@ def cut_single_polygon(
         cut_single_polygon(
             poly2,
             streets,
-            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses_metric),
+            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,

@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from main import get_arguments
 
 # enter the command you want to debug here
-command = 'cut --area_id 166101_1.0103.0017 --min_addresses 40 --config dev/debug_db_config.json --output_table debug_plock'
+command = 'cut --area_id 	166101_1.0103.0017 --min_addresses  --config dev/debug_db_config.json --output_table debug_plock5'
 
 def main():
 

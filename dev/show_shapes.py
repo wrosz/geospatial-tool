@@ -83,7 +83,7 @@ def show_shapes(list_of_shapes, epsg=None, label_attr=None, map_source=ctx.provi
     lines = gdf[gdf.geometry.type.isin(["LineString", "MultiLineString"])]
     points = gdf[gdf.geometry.type.isin(["Point", "MultiPoint"])]
     
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig, ax = plt.subplots(figsize=(8, 6))
     
     # Plot geometries
     if not polygons.empty:
@@ -111,7 +111,15 @@ def show_shapes(list_of_shapes, epsg=None, label_attr=None, map_source=ctx.provi
     
     ax.set_axis_off()
     plt.axis("equal")
-    plt.tight_layout()
+    plt.tight_layout(pad=0.1)
+    
+    # Position window in center of screen
+    mng = plt.get_current_fig_manager()
+    try:
+        mng.window.wm_geometry("+100+50")  # Position at x=100, y=50 from top-left
+    except:
+        pass  # Some backends don't support positioning
+    
     plt.show()
 
 

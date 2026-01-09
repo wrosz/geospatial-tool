@@ -41,9 +41,9 @@ function process_way(profile, way, result, relations)
 
   -- Apply specific rates for highway
   if highway == 'motorway' then
-    rate = 9
+    rate = 7
   elseif highway == 'trunk' then
-    rate = 9
+    rate = 7
   elseif highway == 'primary' then
     rate = 6
   elseif highway == 'secondary' then
@@ -60,20 +60,20 @@ function process_way(profile, way, result, relations)
 
   -- Apply specific rates for railway
   if railway == 'rail' then
-    rate = 9
+    rate = 5
   elseif railway == 'disused' then
-    rate = 6
+    rate = 2
   end
 
   -- Apply specific rates for waterway
   if waterway == 'river' then
-    rate = 10
+    rate = 7
   elseif waterway == 'stream' then
-    rate = 7
+    rate = 5
   elseif waterway == 'canal' then
-    rate = 7
+    rate = 5
   elseif waterway == 'drain' then
-    rate = 2
+    rate = 1
   end
 
   -- Make the way routable with the assigned rate

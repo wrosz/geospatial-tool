@@ -14,36 +14,48 @@ metrical_crs = cfg.metrical_crs
 
 
 def get_osrm_route(
-    lon1: float, lat1: float, lon2: float, lat2: float
+    lon1: float, lat1: float, lon2: float, lat2: float, alternatives: bool | int = False
 ) -> gpd.GeoDataFrame | None:
     """
     Requests a route from OSRM between two coordinates and returns it as a GeoDataFrame.
     To run this, you need to have an OSRM server running locally (see readme for details).
-
     Args:
         lon1 (float): Longitude of the start point.
         lat1 (float): Latitude of the start point.
         lon2 (float): Longitude of the end point.
         lat2 (float): Latitude of the end point.
-
+        alternatives (bool | int): Whether to request alternative routes. If int, specifies the number of alternatives.
     Returns:
-        gpd.GeoDataFrame | None: GeoDataFrame with the route LineString, duration and normalized weight, or None if OSRM fails.
-        (in crs EPSG:4326)
+        gpd.GeoDataFrame | None: GeoDataFrame with the route LineString(s), duration and normalized weight, or None if OSRM fails.
+        (in crs EPSG:4326). Each row represents one route.
     """
     url = (
         f"http://localhost:5000/route/v1/driving/"
-        f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline"
+        f"{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=polyline&alternatives={str(alternatives).lower()}"
     )
     response = requests.get(url)
     data = response.json()
-
     if data["code"] == "Ok":
-        geom = data["routes"][0]["geometry"]
-        coords_latlon = polyline.decode(geom)
-        coords_lonlat = [(lon, lat) for lat, lon in coords_latlon]
-        gdf = gpd.GeoDataFrame(geometry=[LineString(coords_lonlat)], crs="EPSG:4326")
-        gdf["duration"] = data["routes"][0]["duration"]
-        gdf["weight"] = data["routes"][0]["weight"] / data["routes"][0]["distance"]
+        geometries = []
+        durations = []
+        weights = []
+        
+        for route in data["routes"]:
+            geom = route["geometry"]
+            coords_latlon = polyline.decode(geom)
+            coords_lonlat = [(lon, lat) for lat, lon in coords_latlon]
+            geometries.append(LineString(coords_lonlat))
+            durations.append(route["duration"])
+            weights.append(route["weight"] / route["distance"])
+        
+        gdf = gpd.GeoDataFrame(
+            {
+                "geometry": geometries,
+                "duration": durations,
+                "weight": weights
+            },
+            crs="EPSG:4326"
+        )
         return gdf
     else:
         print("OSRM Error:", data)
