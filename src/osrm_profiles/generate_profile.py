@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-
 def parse_weights_csv(csv_path):
     """Parse weights CSV file and organize by OSM key."""
     weights_by_key = defaultdict(list)

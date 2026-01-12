@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "Python Debugger: Merge Areas",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["merge", "--area_id", "1419", "146201", "--min_addresses", "2", "--max_addresses", "10", "--avg"]
+        },
+        {
+            "name": "Python Debugger: Partition Areas",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["cut", "--area_id", "046301_1.0033", "--min_addresses", "20", "--weights_path", "src/handle_database/default_weights.csv"]
+        }
+    ]
+}
