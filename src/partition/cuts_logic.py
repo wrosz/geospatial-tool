@@ -135,7 +135,8 @@ def cut_single_polygon(
     min_addresses: int,
     weights: pd.DataFrame,
     top_weights_percentage: float = cfg.default_top_weights_percentage,
-    depth: int = 0
+    depth: int = 0,
+    iteration: int = 0
 ) -> list[gpd.GeoDataFrame]:
     """
     Recursively splits a polygon using street routes to maximize balance and weight.
@@ -148,15 +149,19 @@ def cut_single_polygon(
         weights (pd.DataFrame): DataFrame with weights for street types.
         top_weights_percentage (float): Fraction of top-weighted cuts to consider.
         depth (int): Recursion depth for debugging purposes and printing messages.
+        iteration (int): Current iteration count for debugging purposes.
 
     Returns:
         list[gpd.GeoDataFrame]: List of GeoDataFrames for each resulting polygon piece.
     """
 
+    iteration = iteration + 1
+
     if len(polygon_gdf) != 1 or not isinstance(polygon_gdf.geometry.iloc[0], Polygon):
-        raise ValueError("Input polygon_gdf must contain exactly one polygon")
+        warnings.warn(f"Input GeoDataFrame must contain exactly one Polygon geometry, returning the original polygon (iteration {iteration})")
+        return [polygon_gdf]
     if len(streets) == 0:
-        warnings.warn("No streets provided, returning the original polygon")
+        warnings.warn("No streets provided, returning the original polygon (iteration {iteration})")
         return [polygon_gdf]
     
     # ensure data is in the correct CRS
@@ -169,13 +174,13 @@ def cut_single_polygon(
         polygon_gdf["n_addresses"] = len(utils.addresses_inside_polygon(polygon_gdf.geometry.iloc[0], addresses))
     if polygon_gdf["n_addresses"].iloc[0] < min_addresses:
         warnings.warn(
-            f"Polygon has fewer addresses ({polygon_gdf['n_addresses'].iloc[0]}) than the minimum required ({min_addresses}), returning the original polygon"
+            f"Polygon has fewer addresses ({polygon_gdf['n_addresses'].iloc[0]}) than the minimum required ({min_addresses}), returning the original polygon (iteration {iteration})"
         )
         return [polygon_gdf]
 
     # Calculate the boundaries of the polygon and find intersections with streets
     if not polygon_gdf.geometry.iloc[0].is_valid:
-        warnings.warn("Input polygon is not valid, returning the original polygon")
+        warnings.warn(f"Input polygon is not valid, returning the original polygon (iteration {iteration})")
         return [polygon_gdf]
     borders = polygon_gdf["geometry"].boundary
     borders = gpd.GeoDataFrame(geometry=borders, crs=metrical_crs)
