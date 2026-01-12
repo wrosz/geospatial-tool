@@ -136,7 +136,7 @@ def cut_single_polygon(
     weights: pd.DataFrame,
     top_weights_percentage: float = cfg.default_top_weights_percentage,
     depth: int = 0,
-    iteration: int = 0
+    _iteration_counter: list[int] = None
 ) -> list[gpd.GeoDataFrame]:
     """
     Recursively splits a polygon using street routes to maximize balance and weight.
@@ -149,13 +149,17 @@ def cut_single_polygon(
         weights (pd.DataFrame): DataFrame with weights for street types.
         top_weights_percentage (float): Fraction of top-weighted cuts to consider.
         depth (int): Recursion depth for debugging purposes and printing messages.
-        iteration (int): Current iteration count for debugging purposes.
+        _iteration_counter (list[int]): List to keep track of iteration counts for debugging purposes.
 
     Returns:
         list[gpd.GeoDataFrame]: List of GeoDataFrames for each resulting polygon piece.
     """
 
-    iteration = iteration + 1
+    if _iteration_counter is None:
+        _iteration_counter = [0]
+
+    _iteration_counter[0] += 1
+    iteration = _iteration_counter[0]
 
     if len(polygon_gdf) != 1 or not isinstance(polygon_gdf.geometry.iloc[0], Polygon):
         warnings.warn(f"Input GeoDataFrame must contain exactly one Polygon geometry, returning the original polygon (iteration {iteration})")
@@ -299,7 +303,8 @@ def cut_single_polygon(
             min_addresses,
             weights,
             top_weights_percentage,
-            depth + 1
+            depth + 1,
+            _iteration_counter=_iteration_counter
         )
     )
     pieces.extend(
@@ -310,7 +315,8 @@ def cut_single_polygon(
             min_addresses,
             weights,
             top_weights_percentage,
-            depth + 1
+            depth + 1,
+            _iteration_counter=_iteration_counter
         )
     )
     

@@ -74,10 +74,10 @@ You can use the **default profile** included in the repo (`src\osrm_profiles\out
 python generate_profile.py weights.csv output_profile.lua
 ```
 
+
 See the **Configuration File** section below for the required format of `weights.csv`.
 
 **Note:** This is experimental and may not work well on very large OSM files.
-
 
 
 ### Set Up Docker and OSRM
@@ -120,7 +120,7 @@ osm2pgsql -d osm -U postgres --create --slim --hstore -C 2000 -G --number-proces
 
 ### Required Tables
 
-Your database must include at least three tables required for the area processing workflow. Each table must contain specific types of data, which are outlined in the sections below.
+Your input database must include at least three tables required for the area processing workflow. Each table must contain specific types of data, which are outlined in the sections below.
 While the example column names are provided for reference, you are free to use your own - just make sure they are correctly specified in the configuration file, as described in the next section.
 
 #### Addresses Table
@@ -156,18 +156,33 @@ To run the program, you need to provide configuration details in a `db_config.js
 
 ---
 
-### `connection`
+### `input_database`
 
-Contains the credentials required to connect to your PostgreSQL database.
+Contains the credentials required to connect to your PostgreSQL database containing required tables, as specified in the section above.
 
 ```json
-"connection": {
-  "host": "localhost",
-  "port": 5432,
-  "name": "your_database_name",
-  "user": "your_username",
-  "password": "your_password"
-}
+"input_db": {
+    "host": "your_input_db_host",
+    "port": 5432,
+    "name": "your_input_database_name",
+    "user": "your_input_username",
+    "password": "your_input_password"
+  }
+```
+
+---
+### `output_database`
+
+Same as above, contains the credentials required to connect to the PostgreSQL database where results will be saved after area cutting or merging.
+
+```json
+"output_db": {
+    "host": "your_output_db_host",
+    "port": 5432,
+    "name": "your_output_database_name",
+    "user": "your_output_username",
+    "password": "your_output_password"
+  }
 ```
 
 ---

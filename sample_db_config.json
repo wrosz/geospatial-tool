@@ -1,10 +1,18 @@
 {
-  "connection": {
-    "host": "localhost",
+  "input_db": {
+    "host": "your_input_db_host",
     "port": 5432,
-    "name": "your_database_name",
-    "user": "your_username",
-    "password": "your_password"
+    "name": "your_input_database_name",
+    "user": "your_input_username",
+    "password": "your_input_password"
+  },
+
+  "output_db": {
+    "host": "your_output_db_host",
+    "port": 5432,
+    "name": "your_output_database_name",
+    "user": "your_output_username",
+    "password": "your_output_password"
   },
 
   "weights": {
