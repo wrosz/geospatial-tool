@@ -10,13 +10,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from main import get_arguments
 
 # enter the command you want to debug here
-command = 'cut --area_id 146201_1.0008 --min_addresses 20'
+command = 'cut --area_id 166101_1.0103 --min_addresses 30 --output_table opole_centrum_test'
 
 def main():
 
     if len(sys.argv) == 1:
+        # Enable warnings as errors for debugging
         # import warnings
         # warnings.simplefilter("error")
+
         sys.argv.extend(command.split())
 
     args = get_arguments(argv=sys.argv[1:])

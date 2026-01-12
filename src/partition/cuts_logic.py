@@ -39,7 +39,7 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             p1_lon, p1_lat = p1.geometry.x, p1.geometry.y
             p2_lon, p2_lat = p2.geometry.x, p2.geometry.y
 
-            route_gdf = utils.get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat)
+            route_gdf = utils.get_osrm_route(p1_lon, p1_lat, p2_lon, p2_lat, alternatives=cfg.number_of_alternatives)
             if route_gdf is not None:
                 routes.append(route_gdf)
 
@@ -47,7 +47,7 @@ def find_all_routes(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         routes_gdf = pd.concat(routes).reset_index(drop=True)
         return routes_gdf
     else:
-        return gpd.GeoDataFrame(columns=["geometry", "duration"], crs="EPSG:4326")
+        return gpd.GeoDataFrame(columns=["geometry", "duration", "weight"], crs="EPSG:4326")
     
 
 
@@ -135,7 +135,8 @@ def cut_single_polygon(
     min_addresses: int,
     weights: pd.DataFrame,
     top_weights_percentage: float = cfg.default_top_weights_percentage,
-    depth: int = 0
+    depth: int = 0,
+    _iteration_counter: list[int] = None
 ) -> list[gpd.GeoDataFrame]:
     """
     Recursively splits a polygon using street routes to maximize balance and weight.
@@ -148,15 +149,23 @@ def cut_single_polygon(
         weights (pd.DataFrame): DataFrame with weights for street types.
         top_weights_percentage (float): Fraction of top-weighted cuts to consider.
         depth (int): Recursion depth for debugging purposes and printing messages.
+        _iteration_counter (list[int]): List to keep track of iteration counts for debugging purposes.
 
     Returns:
         list[gpd.GeoDataFrame]: List of GeoDataFrames for each resulting polygon piece.
     """
 
+    if _iteration_counter is None:
+        _iteration_counter = [0]
+
+    _iteration_counter[0] += 1
+    iteration = _iteration_counter[0]
+
     if len(polygon_gdf) != 1 or not isinstance(polygon_gdf.geometry.iloc[0], Polygon):
-        raise ValueError("Input polygon_gdf must contain exactly one polygon")
+        warnings.warn(f"Input GeoDataFrame must contain exactly one Polygon geometry, returning the original polygon (iteration {iteration})")
+        return [polygon_gdf]
     if len(streets) == 0:
-        warnings.warn("No streets provided, returning the original polygon")
+        warnings.warn("No streets provided, returning the original polygon (iteration {iteration})")
         return [polygon_gdf]
     
     # ensure data is in the correct CRS
@@ -169,13 +178,13 @@ def cut_single_polygon(
         polygon_gdf["n_addresses"] = len(utils.addresses_inside_polygon(polygon_gdf.geometry.iloc[0], addresses))
     if polygon_gdf["n_addresses"].iloc[0] < min_addresses:
         warnings.warn(
-            f"Polygon has fewer addresses ({polygon_gdf['n_addresses'].iloc[0]}) than the minimum required ({min_addresses}), returning the original polygon"
+            f"Polygon has fewer addresses ({polygon_gdf['n_addresses'].iloc[0]}) than the minimum required ({min_addresses}), returning the original polygon (iteration {iteration})"
         )
         return [polygon_gdf]
 
     # Calculate the boundaries of the polygon and find intersections with streets
     if not polygon_gdf.geometry.iloc[0].is_valid:
-        warnings.warn("Input polygon is not valid, returning the original polygon")
+        warnings.warn(f"Input polygon is not valid, returning the original polygon (iteration {iteration})")
         return [polygon_gdf]
     borders = polygon_gdf["geometry"].boundary
     borders = gpd.GeoDataFrame(geometry=borders, crs=metrical_crs)
@@ -186,8 +195,9 @@ def cut_single_polygon(
         return [polygon_gdf]
     
     # Find all routes between intersections
-    cuts = find_all_routes(intersections).to_crs(metrical_crs)[["geometry"]]
+    cuts = find_all_routes(intersections).to_crs(metrical_crs).loc[:, ["geometry", "weight"]]
     cuts = trim_routes(cuts, polygon_gdf)
+
 
     # add a column for a list of addresses inside each component a cut creates
     cuts["n_addresses"] = [None for _ in cuts.iterrows()]
@@ -232,15 +242,6 @@ def cut_single_polygon(
         if depth == 0:
             print("No valid cuts found, returning the original polygon")
         return [polygon_gdf]
-    
-    cuts["weight"] = [
-        utils.calculate_weight_by_buffer(
-            gpd.GeoDataFrame(geometry=[row.geometry], crs=metrical_crs),
-            streets,
-            weights,
-        )
-        for _, row in cuts.iterrows()
-    ]
 
     # Select top cuts based on weight
     cuts = cuts[cuts["weight"] >= cuts["weight"].quantile(1 - top_weights_percentage)]
@@ -273,10 +274,8 @@ def cut_single_polygon(
         poly2_geom
     )
     
-    # Recalculate n_addresses after cleaning
-    addresses_metric = addresses.to_crs(metrical_crs)
-    n_addr_1 = len(utils.addresses_inside_polygon(poly1_geom, addresses_metric))
-    n_addr_2 = len(utils.addresses_inside_polygon(poly2_geom, addresses_metric))
+    n_addr_1 = len(utils.addresses_inside_polygon(poly1_geom, addresses))
+    n_addr_2 = len(utils.addresses_inside_polygon(poly2_geom, addresses))
     
     # Create GeoDataFrames for each piece
     poly1 = gpd.GeoDataFrame(
@@ -300,22 +299,24 @@ def cut_single_polygon(
         cut_single_polygon(
             poly1,
             streets,
-            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses_metric),
+            utils.addresses_inside_polygon(poly1.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,
-            depth + 1
+            depth + 1,
+            _iteration_counter=_iteration_counter
         )
     )
     pieces.extend(
         cut_single_polygon(
             poly2,
             streets,
-            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses_metric),
+            utils.addresses_inside_polygon(poly2.geometry.iloc[0], addresses),
             min_addresses,
             weights,
             top_weights_percentage,
-            depth + 1
+            depth + 1,
+            _iteration_counter=_iteration_counter
         )
     )
     

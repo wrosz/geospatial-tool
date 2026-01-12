@@ -63,13 +63,30 @@ Get the OSM data for your region:
 wget https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf
 ```
 
+
+### Generate `output_profile.lua`
+
+Before starting the OSRM Docker server, you need an `output_profile.lua` in the same directory as your `.osm.pbf` file.
+
+You can use the **default profile** included in the repo (`src\osrm_profiles\output_profile.lua`), or generate a custom one with different weights using the script and a `weights.csv` file:
+
+```powershell
+python generate_profile.py weights.csv output_profile.lua
+```
+
+
+See the **Configuration File** section below for the required format of `weights.csv`.
+
+**Note:** This is experimental and may not work well on very large OSM files.
+
+
 ### Set Up Docker and OSRM
 
 1. Install Docker Desktop.
 2. In the directory with your `.osm.pbf` file, run:
 
 ```bash
-docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/mazowieckie-latest.osm.pbf
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /data/output_profile.lua /data/mazowieckie-latest.osm.pbf
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/mazowieckie-latest.osrm
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/mazowieckie-latest.osrm
 ```
@@ -77,7 +94,7 @@ docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize
 To start the server:
 
 ```bash
-docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
+docker run -t -i -p 5000:5000 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
 ```
 
 ---
@@ -103,7 +120,7 @@ osm2pgsql -d osm -U postgres --create --slim --hstore -C 2000 -G --number-proces
 
 ### Required Tables
 
-Your database must include at least three tables required for the area processing workflow. Each table must contain specific types of data, which are outlined in the sections below.
+Your input database must include at least three tables required for the area processing workflow. Each table must contain specific types of data, which are outlined in the sections below.
 While the example column names are provided for reference, you are free to use your own - just make sure they are correctly specified in the configuration file, as described in the next section.
 
 #### Addresses Table
@@ -139,18 +156,33 @@ To run the program, you need to provide configuration details in a `db_config.js
 
 ---
 
-### `connection`
+### `input_database`
 
-Contains the credentials required to connect to your PostgreSQL database.
+Contains the credentials required to connect to your PostgreSQL database containing required tables, as specified in the section above.
 
 ```json
-"connection": {
-  "host": "localhost",
-  "port": 5432,
-  "name": "your_database_name",
-  "user": "your_username",
-  "password": "your_password"
-}
+"input_db": {
+    "host": "your_input_db_host",
+    "port": 5432,
+    "name": "your_input_database_name",
+    "user": "your_input_username",
+    "password": "your_input_password"
+  }
+```
+
+---
+### `output_database`
+
+Same as above, contains the credentials required to connect to the PostgreSQL database where results will be saved after area cutting or merging.
+
+```json
+"output_db": {
+    "host": "your_output_db_host",
+    "port": 5432,
+    "name": "your_output_database_name",
+    "user": "your_output_username",
+    "password": "your_output_password"
+  }
 ```
 
 ---
@@ -158,7 +190,7 @@ Contains the credentials required to connect to your PostgreSQL database.
 ### `weights`
 
 This section provides the default path to a `.csv` file containing weights for geometry attributes from OpenStreetMap (OSM). These weights are used in computations unless another weights file is explicitly passed as an argument.
-You can find an example weights file at `src.handle_database/default.weights.csv` - you can either use this path or create your own file with the same format.
+You can find an example weights file at `src/osrm_profiles/weights.csv` - you can either use this path or create your own file with the same format.
 
 ```json
 "weights": {

@@ -15,10 +15,11 @@ def run_merge(args):
         config = json.load(f)
     
     # Connect to database
-    engine = db_io.connect(config["connection"])
+    engine_input = db_io.connect(config["input_db"])
+    engine_output = db_io.connect(config["output_db"])
 
     # Load all relevant data from the database
-    data = db_io.load_all_data_with_bbox(engine, config["data_for_merge"], args)
+    data = db_io.load_all_data_with_bbox(engine_input, config["data_for_merge"], args)
     area, addresses = data["area"], data["addresses"]
 
     if args.avg:
@@ -40,4 +41,4 @@ def run_merge(args):
     )
 
     # Save result to database
-    db_io.save_result(engine, result, config["data_for_merge"]["output"], args.output_table)
+    db_io.save_result(engine_output, result, config["data_for_merge"]["output"], args.output_table)

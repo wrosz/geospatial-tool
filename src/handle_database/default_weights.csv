@@ -1,7 +1,0 @@
-osm_key,osm_value,weight
-highway,primary,6
-highway,secondary,5
-highway,tertiary,4
-highway,unclassified,3
-highway,residential,2
-highway,living,1

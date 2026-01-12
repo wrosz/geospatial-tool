@@ -8,7 +8,7 @@
   },
 
   "weights": {
-      "default_weights_path": "src/handle_database/default_weights.csv"
+      "default_weights_path": "src/osrm_profiles/weights.csv"
   },
 
   "data_for_partition": {
@@ -24,7 +24,7 @@
       }
     },
     "areas": {
-      "area_table": "cut_results_123",
+      "area_table": "opole",
       "area_id_column": "id",
       "area_geom_column": "geometry",
       "crs": "EPSG:4326"

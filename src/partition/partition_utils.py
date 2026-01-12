@@ -4,7 +4,6 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 import src.logic_config as cfg
-import src.utils as utils
 
 metrical_crs = cfg.metrical_crs
 

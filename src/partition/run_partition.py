@@ -11,13 +11,14 @@ def run_partition(args):
         config = json.load(f)
     
     # Connect to database
-    engine = db_io.connect(config["connection"])
+    engine_input = db_io.connect(config["input_db"])
+    engine_output = db_io.connect(config["output_db"])
     
     # Load weights from CSV
     weights = db_io.load_weights_from_csv(args.weights_path, config["weights"])
     
     # Load all relevant data from the database
-    data = db_io.load_all_data_with_bbox(engine, config["data_for_partition"], args)
+    data = db_io.load_all_data_with_bbox(engine_input, config["data_for_partition"], args)
     area, addresses, osm_data = data["area"], data["addresses"], data.get("osm_data")
     
     if args.avg:
@@ -45,7 +46,7 @@ def run_partition(args):
     for i, gdf in enumerate(polygon_results):
         if_exists = "replace" if i == 0 else "append"
         db_io.save_result(
-            engine=engine,
+            engine = engine_output,
             gdf=gdf,
             output_cfg=config["data_for_partition"]["output"],
             output_table=output_table,
