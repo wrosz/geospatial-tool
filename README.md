@@ -63,13 +63,30 @@ Get the OSM data for your region:
 wget https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf
 ```
 
+
+### Generate `output_profile.lua`
+
+Before starting the OSRM Docker server, you need an `output_profile.lua` in the same directory as your `.osm.pbf` file.
+
+You can use the **default profile** included in the repo (`src\osrm_profiles\output_profile.lua`), or generate a custom one with different weights using the script and a `weights.csv` file:
+
+```powershell
+python generate_profile.py weights.csv output_profile.lua
+```
+
+See the **Configuration File** section below for the required format of `weights.csv`.
+
+**Note:** This is experimental and may not work well on very large OSM files.
+
+
+
 ### Set Up Docker and OSRM
 
 1. Install Docker Desktop.
 2. In the directory with your `.osm.pbf` file, run:
 
 ```bash
-docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/mazowieckie-latest.osm.pbf
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /data/output_profile.lua /data/mazowieckie-latest.osm.pbf
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/mazowieckie-latest.osrm
 docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/mazowieckie-latest.osrm
 ```
@@ -77,7 +94,7 @@ docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize
 To start the server:
 
 ```bash
-docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
+docker run -t -i -p 5000:5000 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/mazowieckie-latest.osrm
 ```
 
 ---
@@ -158,7 +175,7 @@ Contains the credentials required to connect to your PostgreSQL database.
 ### `weights`
 
 This section provides the default path to a `.csv` file containing weights for geometry attributes from OpenStreetMap (OSM). These weights are used in computations unless another weights file is explicitly passed as an argument.
-You can find an example weights file at `src.handle_database/default.weights.csv` - you can either use this path or create your own file with the same format.
+You can find an example weights file at `src/osrm_profiles/weights.csv` - you can either use this path or create your own file with the same format.
 
 ```json
 "weights": {
