@@ -110,9 +110,9 @@ function process_turn(profile, turn)
   -- Apply penalties at intersections to prefer straight routes
   if turn.number_of_roads > 2 or turn.source_mode ~= turn.target_mode or turn.is_u_turn then
     -- Simple angle-based penalty: penalty increases with turn angle
-    -- 0° (straight) = 0 penalty
-    -- 90° = ~half max penalty
-    -- 180° (u-turn) = max penalty
+    -- 0ï¿½ (straight) = 0 penalty
+    -- 90ï¿½ = ~half max penalty
+    -- 180ï¿½ (u-turn) = max penalty
     local angle_fraction = math.abs(turn.angle) / 180.0
     turn.duration = turn_penalty * angle_fraction
 

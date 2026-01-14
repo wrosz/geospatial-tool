@@ -27,3 +27,5 @@ dist/
 
 # hidden files
 db_config.json
+db_config_emapa.json
+dev/
